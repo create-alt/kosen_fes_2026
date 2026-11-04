@@ -1,0 +1,7 @@
+.venv/*
+_log/*
+.git/*
+dataset/*
+oldbase/*
+video/*
+__pycache__/*
