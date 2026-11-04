@@ -1,0 +1,41 @@
+newmtl OchreArmor
+Kd 0.78 0.39 0.09
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
+
+newmtl DarkSteel
+Kd 0.12 0.16 0.19
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
+
+newmtl Steel
+Kd 0.36 0.42 0.44
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
+
+newmtl RedWarhead
+Kd 0.74 0.1 0.065
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
+
+newmtl IvoryBand
+Kd 0.86 0.78 0.58
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
+
+newmtl ExhaustCore
+Kd 0.95 0.32 0.045
+Ks 0.15 0.15 0.15
+Ns 24
+d 1
+illum 2
