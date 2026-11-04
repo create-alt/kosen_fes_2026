@@ -1,0 +1,339 @@
+"""判定の部分: ヒット(手とバッグの接触)・パンチ判定・頭と体の動き量・キー押下の判定。
+
+ヒット : 手(手首)を中心とする半径 R の円に、サンドバッグの領域が入っている(接触または重なり)
+パンチ : 既定は「接触のみ」: 手の円が新しくバッグに触れたら 1 回(cooldown 秒の間隔つき)
+         threshold を指定すると、接触の直後(window 秒以内)に、バッグの傾きが静止時から
+         threshold 度以上ずれたときだけ。バッグの振動で何度しきい値を超えても、新しい接触が無ければ数えない
+動き量 : 頭の上下(上が正)と体の重心の前後(バッグへ近づくと正)の、基準(キャリブレーション時)からのずれ
+"""
+
+import statistics
+from dataclasses import dataclass
+from typing import Optional
+
+import cv2
+
+from common import HEAD_POINTS, SHOULDERS, HIPS
+
+BODY_POINTS = SHOULDERS + HIPS
+
+
+def hit_test(contour, hands, radius):
+    """手のどれかを中心とする半径 radius の円が、バッグの領域と接触または重なっているか。"""
+    for x, y in hands:
+        # 符号つき距離: 領域の内側なら正、外側なら負。外側へ radius 以内なら接触
+        if cv2.pointPolygonTest(contour, (float(x), float(y)), True) >= -radius:
+            return True
+    return False
+
+
+class PunchJudge:
+    """バッグの傾きの基準と、手の接触から、パンチを判定する。"""
+
+    def __init__(
+        self,
+        use_hands=True,
+        threshold=None,
+        cooldown=0.5,
+        calib_frames=30,
+        hand_radius=None,
+        hand_radius_ratio=0.5,
+        window=0.3,
+        pre_window=0.1,
+        release=0.15,
+        sway_max=None,
+    ):
+        """
+        use_hands         : True なら手の接触を条件にする。False なら傾きだけで判定(従来方式)
+        threshold         : None なら手の接触だけでパンチ(傾きは見ない)。数値なら、接触に加えて静止時からの
+                            傾きのずれ(度)がこの値以上のときパンチ。手を使わない(傾きだけの)判定では None は 8.0
+        cooldown          : パンチと判定してから、次を判定するまでの最短時間(秒)
+        calib_frames      : 静止時の傾き(基準)を測るフレーム数
+        hand_radius       : 手を中心とする円の半径(画素)。None なら バッグの幅 × hand_radius_ratio
+        window / pre_window : 接触の後 / 直前の、この秒数以内の揺れをパンチとする
+        release           : 手がこの秒数以上離れてから触れたら、新しい接触とする(検出のちらつき対策)
+        sway_max          : 揺れの上限(度)。超えるずれはパンチの揺れとみなさない。None なら上限なし
+        """
+        self.use_hands, self.cooldown = use_hands, cooldown
+        self.contact_only = use_hands and threshold is None  # 接触だけでパンチと判定する
+        self.threshold = threshold if threshold is not None else (None if use_hands else 8.0)
+        self.calib_frames = calib_frames
+        self.hand_radius, self.hand_radius_ratio = hand_radius, hand_radius_ratio
+        self.window, self.pre_window, self.release, self.sway_max = window, pre_window, release, sway_max
+
+        self.baseline: Optional[float] = None  # 静止時の傾き
+        self.deviation = 0.0  # 基準からのずれ(度)
+        self.punch_count = 0
+        self.contact_count = 0
+        self.hit: Optional[bool] = None  # 今、手の円にバッグが入っているか(手が見えなければ False、判定不能は None)
+        self.radius = None  # 直近に使った円の半径(画素)
+        self.hands = []  # 直近の手の位置(表示用)
+
+        self._calib = []
+        self._armed = True
+        self._last_punch = -1e9
+        self._last_touch = -1e9
+        self._last_exceed = -1e9
+        self._contact_time = None  # まだパンチに使っていない接触の時刻
+        self._show_until = 0.0
+
+    @property
+    def calibrated(self):
+        return self.baseline is not None
+
+    @property
+    def calib_progress(self):
+        return len(self._calib)
+
+    def should_show_punch(self, now):
+        return now < self._show_until
+
+    def _radius_for(self, contour):
+        if self.hand_radius is not None:
+            return float(self.hand_radius)
+        _, _, w, h = cv2.boundingRect(contour)
+        return self.hand_radius_ratio * min(w, h)  # バッグは縦長なので、短い方(幅)
+
+    def _punch(self, now):
+        self.punch_count += 1
+        self._last_punch = now
+        self._show_until = now + 0.5
+
+    def update(self, bag, hands, now):
+        """1フレームぶんを処理し、パンチと判定したら True を返す。bag: BagPose または None"""
+        self.hit = None
+        if bag is None:
+            return False
+
+        # ヒットは、傾きの基準を測っている間も、毎フレーム求める
+        self.hands = list(hands or [])
+        if self.use_hands:
+            self.radius = self._radius_for(bag.contour)
+            self.hit = hit_test(bag.contour, self.hands, self.radius)
+
+        if self.contact_only:
+            self._angle = bag.angle_deg
+            return self._contact_only(now)
+
+        # 静止時の傾きの基準
+        if not self.calibrated:
+            self._calib.append(bag.angle_deg)
+            if len(self._calib) >= self.calib_frames:
+                self.baseline = statistics.median(self._calib)
+            return False
+        self.deviation = bag.angle_deg - self.baseline
+        magnitude = abs(self.deviation)
+
+        if not self.use_hands:
+            return self._tilt_only(magnitude, now)
+
+        exceeding = magnitude >= self.threshold and (self.sway_max is None or magnitude <= self.sway_max)
+        if exceeding:
+            self._last_exceed = now
+        new_contact = False
+        if self.hit:
+            if now - self._last_touch >= self.release:
+                self._contact_time = now
+                self.contact_count += 1
+                new_contact = True
+            self._last_touch = now
+
+        if self._contact_time is None:
+            return False
+        if now - self._contact_time > self.window:
+            self._contact_time = None  # 接触から時間が経った。揺れが無かった(軽く触れただけ)
+            return False
+        # 揺れが接触の直後に起きた、または接触の直前から始まっていた
+        if not (exceeding or (new_contact and self._contact_time - self._last_exceed <= self.pre_window)):
+            return False
+
+        self._contact_time = None  # 1回の接触では1回だけ
+        if now - self._last_punch < self.cooldown:
+            return False
+        self._punch(now)
+        return True
+
+    def _contact_only(self, now):
+        """接触だけで判定: 手が新しくバッグに触れた瞬間に 1 回。傾きの基準は表示用に測り続ける。"""
+        if not self.calibrated:
+            self._calib.append(self._angle)
+            if len(self._calib) >= self.calib_frames:
+                self.baseline = statistics.median(self._calib)
+        else:
+            self.deviation = self._angle - self.baseline
+        punched = False
+        if self.hit:
+            if now - self._last_touch >= self.release:
+                self.contact_count += 1
+                if now - self._last_punch >= self.cooldown:
+                    self._punch(now)
+                    punched = True
+            self._last_touch = now
+        return punched
+
+    def _tilt_only(self, magnitude, now):
+        """傾きだけで判定する方式: しきい値を超えたら1回。静止位置付近まで戻ると次を受け付ける。"""
+        if not self._armed and magnitude <= self.threshold * 0.5:
+            self._armed = True
+        if self._armed and magnitude >= self.threshold and now - self._last_punch >= self.cooldown:
+            self._armed = False
+            self._punch(now)
+            return True
+        return False
+
+
+# ------------------------------------------------------------------ 頭と体の動き量
+
+
+def _mean_of(values):
+    return sum(values) / len(values) if values else None
+
+
+@dataclass
+class MotionReading:
+    """基準からのずれ。見えていない項目は None。*_px は画素数、他は基準の体幹の長さを 1 とした値。"""
+
+    vertical_px: Optional[float] = None  # 頭の上下(上が正)
+    forward_px: Optional[float] = None  # 体の重心の前後(バッグへ近づくと正)
+    vertical: Optional[float] = None
+    forward: Optional[float] = None
+
+
+class BodyMotion:
+    """
+    頭(上下)と体の重心(前後)の動きを、キャリブレーション時の位置からのずれとして求める。
+
+    基準は点ごと(鼻・耳・肩・腰それぞれ)に記録し、動き量は「いま見えている点の、基準からの
+    ずれの平均」で求める。横向きで奥側の点が見え隠れしても、値が飛ばない。
+    キャリブレーション: auto_frames を指定すると最初のそのフレーム数で自動(動画・--no-display)。
+    None なら set_calibrating(True/False) で開始・終了(リアルタイム。押している間に集めた位置の中央値)。
+    """
+
+    def __init__(self, auto_frames=None, smoothing=0.5, forward_direction="auto", min_samples=5):
+        self.auto_frames, self.smoothing = auto_frames, smoothing
+        self.forward_direction, self.min_samples = forward_direction, min_samples
+        self.calibrating = auto_frames is not None
+        self.progress = 0  # キャリブレーションに使ったフレーム数(表示用)
+        self.base = {}  # 点の番号 -> 基準の位置
+        self.scale = None  # 基準の体幹の長さ(正規化用)
+        self.forward_sign = 1.0  # +1: 画像の右が前 / -1: 左が前
+        self.bag_ref_x = None  # キャリブレーション時のバッグ中心の x(画素)
+        self.body_base_x = None  # 基準の体の x(肩・腰の基準の平均)
+        self.head_base_y = None  # 基準の頭の y(頭の点の基準の平均)
+        self._reset()
+        self._smooth = {}
+
+    def _reset(self):
+        self._samples, self._scales, self._body_x, self._bag_x = {}, [], [], []
+
+    @property
+    def calibrated(self):
+        return bool(self.base)
+
+    def set_calibrating(self, active):
+        """active=True の間の頭と体の位置を集め、False にしたとき中央値を基準にする。"""
+        if active and not self.calibrating:
+            self.calibrating, self.progress = True, 0
+            self._reset()
+        elif not active and self.calibrating:
+            self._finish()
+
+    def _finish(self):
+        self.calibrating = False
+        for group in (HEAD_POINTS, BODY_POINTS):
+            found = {i: p for i in group if len(p := self._samples.get(i, [])) >= self.min_samples}
+            if found:  # 測れたときは、古い基準を丸ごと置き換える
+                for i in group:
+                    self.base.pop(i, None)
+                for i, positions in found.items():
+                    self.base[i] = (statistics.median(p[0] for p in positions),
+                                    statistics.median(p[1] for p in positions))
+        if self._scales:
+            self.scale = statistics.median(self._scales)
+        if self.forward_direction != "auto":
+            self.forward_sign = -1.0 if self.forward_direction == "left" else 1.0
+        elif self._body_x and self._bag_x:  # 基準のときの、体からバッグへの向き
+            self.forward_sign = 1.0 if statistics.median(self._bag_x) >= statistics.median(self._body_x) else -1.0
+        self.body_base_x = _mean_of([self.base[i][0] for i in BODY_POINTS if i in self.base])
+        self.head_base_y = _mean_of([self.base[i][1] for i in HEAD_POINTS if i in self.base])
+        if self._bag_x:
+            self.bag_ref_x = statistics.median(self._bag_x)
+        self._smooth = {}
+        self._reset()
+
+    def normalized(self, reading, width, height):
+        """Unity へ送る値 (forward, head)。見積もれないものは None。どちらも 0〜1 に収める。
+
+        forward: キャリブレーション時のバッグの位置を 1、プレイヤー側の画面の端(プレイヤーが左なら左端、
+                 右なら右端)を 0 とした、体の重心の位置。
+        head   : 画面の下を 0、上を 1 とした、頭の高さ。
+        どちらも、見えている点の「基準からのずれ」に基準の位置を足した値なので、横向きで点が隠れても飛びにくい。
+        """
+        clamp = lambda v: max(0.0, min(1.0, v))
+        forward = head = None
+        if reading.forward_px is not None and self.body_base_x is not None and self.bag_ref_x is not None:
+            x = self.body_base_x + self.forward_sign * reading.forward_px
+            edge = 0.0 if self.forward_sign > 0 else float(width)  # 前が右 = プレイヤーは左 = 左端が 0
+            span = self.bag_ref_x - edge
+            if abs(span) > 1.0:
+                forward = clamp((x - edge) / span)
+        if reading.vertical_px is not None and self.head_base_y is not None and height:
+            head = clamp(1.0 - (self.head_base_y - reading.vertical_px) / height)
+        return forward, head
+
+    def update(self, person, bag_x=None) -> MotionReading:
+        """person: PersonPose または None / bag_x: バッグ中心の x(「前」の向きを決める)"""
+        visible = person.visible_points(HEAD_POINTS + BODY_POINTS) if person is not None else {}
+
+        if self.calibrating:
+            self.progress += 1
+            for i, p in visible.items():
+                self._samples.setdefault(i, []).append(p)
+            body = person.body_center if person is not None else None
+            if body is not None and bag_x is not None:
+                self._body_x.append(body[0])
+                self._bag_x.append(bag_x)
+            if person is not None and person.torso_length:
+                self._scales.append(person.torso_length)
+            if self.auto_frames is not None and self.progress >= self.auto_frames:
+                if any(len(v) >= self.min_samples for v in self._samples.values()):
+                    self._finish()
+                else:  # 人が映っていなかった。もう少し待つ
+                    self.progress = 0
+                    self._reset()
+            return MotionReading()
+
+        head = [self.base[i][1] - visible[i][1] for i in HEAD_POINTS if i in visible and i in self.base]
+        body = [visible[i][0] - self.base[i][0] for i in BODY_POINTS if i in visible and i in self.base]
+        reading = MotionReading()
+        for key, moves, sign in (("vertical", head, 1.0), ("forward", body, self.forward_sign)):
+            if not moves:
+                continue
+            raw = sign * sum(moves) / len(moves)
+            previous = self._smooth.get(key)
+            value = raw if previous is None else self.smoothing * raw + (1 - self.smoothing) * previous
+            self._smooth[key] = value
+            setattr(reading, key + "_px", value)
+            if self.scale:
+                setattr(reading, key, value / self.scale)
+        return reading
+
+
+class HoldKey:
+    """
+    キーを押している間だけ True になる判定(OpenCV のウィンドウ用)。OpenCV は「押している間」を
+    直接は教えてくれないので、キーの自動リピートで定期的に届くキー入力を使い、timeout 秒届かなく
+    なったら離したとみなす(押し始めからリピートが始まるまでの間も押していると扱うので、少し長め)。
+    """
+
+    def __init__(self, key="c", timeout=0.7):
+        self.codes = {ord(key.lower()), ord(key.upper())}
+        self.timeout = timeout
+        self._last = -1e9
+
+    def feed(self, key_code, now):
+        if (key_code & 0xFF) in self.codes:
+            self._last = now
+
+    def held(self, now):
+        return now - self._last <= self.timeout
