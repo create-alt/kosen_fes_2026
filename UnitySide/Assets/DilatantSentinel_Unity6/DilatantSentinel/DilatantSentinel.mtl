@@ -1,0 +1,48 @@
+newmtl GelTeal
+Kd 0.1 0.7 0.66
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl GelHighlight
+Kd 0.4 0.91 0.8
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl ArmorOrange
+Kd 0.88 0.43 0.09
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl Steel
+Kd 0.36 0.43 0.46
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl DarkSteel
+Kd 0.09 0.14 0.17
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl Lens
+Kd 0.98 0.76 0.22
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
+
+newmtl Ivory
+Kd 0.88 0.84 0.67
+Ks 0.2 0.2 0.2
+Ns 48
+d 1
+illum 2
