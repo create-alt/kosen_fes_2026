@@ -184,6 +184,12 @@ class PersonPose:
         """両手の位置(手首)。見えている手だけ。"""
         return list(self.visible_points(WRISTS).values())
 
+    @property
+    def hands_by_side(self):
+        """見えている手首 {"L": (x, y), "R": (x, y)}(L = 人の左手、R = 右手)。"""
+        found = self.visible_points(WRISTS)
+        return {side: found[i] for side, i in zip(("L", "R"), WRISTS) if i in found}
+
 
 class PoseEstimator:
     """YOLO-pose で、フレームに写る人のうち最も大きい1人の骨格を推定する。"""

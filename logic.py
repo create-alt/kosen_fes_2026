@@ -1,7 +1,7 @@
 """判定の部分: ヒット(手とバッグの接触)・パンチ判定・頭と体の動き量・キー押下の判定。
 
 ヒット : 手(手首)を中心とする半径 R の円に、サンドバッグの領域が入っている(接触または重なり)
-パンチ : 既定は「接触のみ」: 手の円が新しくバッグに触れたら 1 回(cooldown 秒の間隔つき)
+パンチ : 既定は「接触のみ」: 手の円が新しくバッグに触れたら 1 回。インターバル(cooldown)は左手・右手で別々に数える
          threshold を指定すると、接触の直後(window 秒以内)に、バッグの傾きが静止時から
          threshold 度以上ずれたときだけ。バッグの振動で何度しきい値を超えても、新しい接触が無ければ数えない
 動き量 : 頭の上下(上が正)と体の重心の前後(バッグへ近づくと正)の、基準(キャリブレーション時)からのずれ
@@ -18,8 +18,12 @@ from common import HEAD_POINTS, SHOULDERS, HIPS
 BODY_POINTS = SHOULDERS + HIPS
 
 
+SIDES = ("L", "R")  # L = 人の左手、R = 人の右手(骨格推定の left_wrist / right_wrist)
+
+
 def hit_test(contour, hands, radius):
-    """手のどれかを中心とする半径 radius の円が、バッグの領域と接触または重なっているか。"""
+    """手のどれかを中心とする半径 radius の円が、バッグの領域と接触または重なっているか。
+    hands: [(x, y), ...](リスト)。"""
     for x, y in hands:
         # 符号つき距離: 領域の内側なら正、外側なら負。外側へ radius 以内なら接触
         if cv2.pointPolygonTest(contour, (float(x), float(y)), True) >= -radius:
@@ -27,8 +31,21 @@ def hit_test(contour, hands, radius):
     return False
 
 
+class _HandState:
+    """片手ぶんの状態。インターバル(cooldown)は手ごとに数えるので、左右で連打しても互いに邪魔しない。"""
+
+    def __init__(self):
+        self.last_touch = -1e9  # 最後に円がバッグに入っていた時刻
+        self.contact_time = None  # まだパンチに使っていない接触の時刻(傾き条件ありのとき)
+        self.last_punch = -1e9
+        self.show_until = 0.0
+        self.hit = False
+        self.contacts = 0
+        self.punches = 0
+
+
 class PunchJudge:
-    """バッグの傾きの基準と、手の接触から、パンチを判定する。"""
+    """バッグの傾きの基準と、左右それぞれの手の接触から、パンチを判定する。"""
 
     def __init__(
         self,
@@ -42,19 +59,28 @@ class PunchJudge:
         pre_window=0.1,
         release=0.15,
         sway_max=None,
+        cooldown_left=None,
+        cooldown_right=None,
+        cooldown_any=0.0,
     ):
         """
         use_hands         : True なら手の接触を条件にする。False なら傾きだけで判定(従来方式)
         threshold         : None なら手の接触だけでパンチ(傾きは見ない)。数値なら、接触に加えて静止時からの
                             傾きのずれ(度)がこの値以上のときパンチ。手を使わない(傾きだけの)判定では None は 8.0
-        cooldown          : パンチと判定してから、次を判定するまでの最短時間(秒)
+        cooldown          : 同じ手でパンチと判定してから、その手で次を判定するまでの最短時間(秒)
+        cooldown_left/right : 左手 / 右手だけ別の値にしたいとき。None なら cooldown と同じ
+        cooldown_any      : 左右を問わず、どちらかの手でパンチと判定してから次までの最短時間(秒)。
+                            既定 0 = 左右の連打を妨げない。両手が同時に当たって 2 回数えられるのを防ぎたいときだけ増やす
         calib_frames      : 静止時の傾き(基準)を測るフレーム数
         hand_radius       : 手を中心とする円の半径(画素)。None なら バッグの幅 × hand_radius_ratio
-        window / pre_window : 接触の後 / 直前の、この秒数以内の揺れをパンチとする
-        release           : 手がこの秒数以上離れてから触れたら、新しい接触とする(検出のちらつき対策)
+        window / pre_window : 接触の後 / 直前の、この秒数以内の揺れをパンチとする(threshold 指定時)
+        release           : その手がこの秒数以上離れてから触れたら、新しい接触とする(検出のちらつき対策)
         sway_max          : 揺れの上限(度)。超えるずれはパンチの揺れとみなさない。None なら上限なし
         """
-        self.use_hands, self.cooldown = use_hands, cooldown
+        self.use_hands, self.cooldown_any = use_hands, cooldown_any
+        self.cooldown = {"L": cooldown if cooldown_left is None else cooldown_left,
+                         "R": cooldown if cooldown_right is None else cooldown_right}
+        self._base_cooldown = cooldown  # 傾きだけの判定で使う
         self.contact_only = use_hands and threshold is None  # 接触だけでパンチと判定する
         self.threshold = threshold if threshold is not None else (None if use_hands else 8.0)
         self.calib_frames = calib_frames
@@ -63,20 +89,40 @@ class PunchJudge:
 
         self.baseline: Optional[float] = None  # 静止時の傾き
         self.deviation = 0.0  # 基準からのずれ(度)
-        self.punch_count = 0
-        self.contact_count = 0
-        self.hit: Optional[bool] = None  # 今、手の円にバッグが入っているか(手が見えなければ False、判定不能は None)
+        self.punch_count = 0  # 左右合計
+        self.hit: Optional[bool] = None  # どちらかの手の円にバッグが入っているか(判定不能は None)
         self.radius = None  # 直近に使った円の半径(画素)
-        self.hands = []  # 直近の手の位置(表示用)
+        self.hands = {}  # 直近の手の位置 {"L": (x, y), "R": (x, y)}(見えている手だけ。表示用)
+        self.punch_sides = []  # 直近のフレームでパンチと判定した手 ["L"], ["R"], ["L", "R"] または []
+        self._hand = {s: _HandState() for s in SIDES}
 
+        self.calibrating = False  # C キー(など)で、いま基準を測り直している間
+        self._recal = []
         self._calib = []
         self._armed = True
-        self._last_punch = -1e9
-        self._last_touch = -1e9
+        self._last_punch_any = -1e9
         self._last_exceed = -1e9
-        self._contact_time = None  # まだパンチに使っていない接触の時刻
-        self._show_until = 0.0
+        self._angle = 0.0
 
+    def set_calibrating(self, active):
+        """
+        active=True の間のバッグの傾きを集め、False にしたとき、その中央値を新しい基準(静止時の傾き)にする。
+        測っている間は、パンチの判定はしない(基準を測るための時間なので)。起動直後の自動の基準測定は、
+        これを使わなくても行われ(calib_frames)、あとからこれで測り直すと置き換わる。
+        """
+        if active and not self.calibrating:
+            self.calibrating, self._recal = True, []
+        elif not active and self.calibrating:
+            self.calibrating = False
+            if self._recal:
+                self.baseline = statistics.median(self._recal)
+                self.deviation = 0.0
+            self._recal = []
+            self._armed = True
+            for h in self._hand.values():  # 測っている間の接触は、パンチに使わない
+                h.contact_time = None
+
+    # ----- 参照用
     @property
     def calibrated(self):
         return self.baseline is not None
@@ -85,34 +131,85 @@ class PunchJudge:
     def calib_progress(self):
         return len(self._calib)
 
-    def should_show_punch(self, now):
-        return now < self._show_until
+    @property
+    def contact_count(self):
+        return sum(h.contacts for h in self._hand.values())
 
+    @property
+    def punch_counts(self):
+        return {s: self._hand[s].punches for s in SIDES}
+
+    @property
+    def contact_counts(self):
+        return {s: self._hand[s].contacts for s in SIDES}
+
+    @property
+    def hit_sides(self):
+        """いま円にバッグが入っている手 {"L": bool, "R": bool}。"""
+        return {s: self._hand[s].hit for s in SIDES}
+
+    def should_show_punch(self, now, side=None):
+        """PUNCH! を表示している間か。side を指定すると、その手のパンチだけ。"""
+        if side is not None:
+            return now < self._hand[side].show_until
+        return any(now < h.show_until for h in self._hand.values())
+
+    # ----- 内部
     def _radius_for(self, contour):
         if self.hand_radius is not None:
             return float(self.hand_radius)
         _, _, w, h = cv2.boundingRect(contour)
         return self.hand_radius_ratio * min(w, h)  # バッグは縦長なので、短い方(幅)
 
-    def _punch(self, now):
+    def _allowed(self, side, now):
+        return (now - self._hand[side].last_punch >= self.cooldown[side]
+                and now - self._last_punch_any >= self.cooldown_any)
+
+    def _punch(self, side, now):
+        h = self._hand[side]
+        h.punches += 1
+        h.last_punch = now
+        h.show_until = now + 0.5
         self.punch_count += 1
-        self._last_punch = now
-        self._show_until = now + 0.5
+        self._last_punch_any = now
+        self.punch_sides.append(side)
+
+    def _touch(self, side, now):
+        """この手の円がバッグに入っているときの処理。新しい接触なら True を返す。"""
+        h = self._hand[side]
+        new_contact = False
+        if h.hit:
+            if now - h.last_touch >= self.release:
+                h.contacts += 1
+                new_contact = True
+            h.last_touch = now
+        return new_contact
 
     def update(self, bag, hands, now):
-        """1フレームぶんを処理し、パンチと判定したら True を返す。bag: BagPose または None"""
+        """
+        1フレームぶんを処理し、どちらかの手でパンチと判定したら True を返す(どちらの手かは punch_sides)。
+        bag: BagPose または None / hands: {"L": (x, y), "R": (x, y)}(見えている手だけ)
+        """
         self.hit = None
+        self.punch_sides = []
+        for h in self._hand.values():
+            h.hit = False
         if bag is None:
             return False
 
-        # ヒットは、傾きの基準を測っている間も、毎フレーム求める
-        self.hands = list(hands or [])
+        # ヒットは、傾きの基準を測っている間も、毎フレーム求める(手ごとに)
+        self.hands = dict(hands or {})
         if self.use_hands:
             self.radius = self._radius_for(bag.contour)
-            self.hit = hit_test(bag.contour, self.hands, self.radius)
+            for side, point in self.hands.items():
+                self._hand[side].hit = hit_test(bag.contour, [point], self.radius)
+            self.hit = any(h.hit for h in self._hand.values())
 
+        self._angle = bag.angle_deg
+        if self.calibrating:  # 基準を測り直している間は、傾きを集めるだけ(パンチは判定しない)
+            self._recal.append(bag.angle_deg)
+            return False
         if self.contact_only:
-            self._angle = bag.angle_deg
             return self._contact_only(now)
 
         # 静止時の傾きの基準
@@ -130,54 +227,50 @@ class PunchJudge:
         exceeding = magnitude >= self.threshold and (self.sway_max is None or magnitude <= self.sway_max)
         if exceeding:
             self._last_exceed = now
-        new_contact = False
-        if self.hit:
-            if now - self._last_touch >= self.release:
-                self._contact_time = now
-                self.contact_count += 1
-                new_contact = True
-            self._last_touch = now
-
-        if self._contact_time is None:
-            return False
-        if now - self._contact_time > self.window:
-            self._contact_time = None  # 接触から時間が経った。揺れが無かった(軽く触れただけ)
-            return False
-        # 揺れが接触の直後に起きた、または接触の直前から始まっていた
-        if not (exceeding or (new_contact and self._contact_time - self._last_exceed <= self.pre_window)):
-            return False
-
-        self._contact_time = None  # 1回の接触では1回だけ
-        if now - self._last_punch < self.cooldown:
-            return False
-        self._punch(now)
-        return True
+        for side in SIDES:
+            h = self._hand[side]
+            new_contact = self._touch(side, now)
+            if new_contact:
+                h.contact_time = now
+            if h.contact_time is None:
+                continue
+            if now - h.contact_time > self.window:
+                h.contact_time = None  # 接触から時間が経った。揺れが無かった(軽く触れただけ)
+                continue
+            # 揺れが接触の直後に起きた、または接触の直前から始まっていた
+            if not (exceeding or (new_contact and h.contact_time - self._last_exceed <= self.pre_window)):
+                continue
+            h.contact_time = None  # 1回の接触では1回だけ
+            if self._allowed(side, now):
+                self._punch(side, now)
+        return bool(self.punch_sides)
 
     def _contact_only(self, now):
-        """接触だけで判定: 手が新しくバッグに触れた瞬間に 1 回。傾きの基準は表示用に測り続ける。"""
+        """接触だけで判定: その手の円が新しくバッグに触れた瞬間に 1 回(手ごとのインターバルつき)。
+        傾きの基準は表示用に測り続ける。"""
         if not self.calibrated:
             self._calib.append(self._angle)
             if len(self._calib) >= self.calib_frames:
                 self.baseline = statistics.median(self._calib)
         else:
             self.deviation = self._angle - self.baseline
-        punched = False
-        if self.hit:
-            if now - self._last_touch >= self.release:
-                self.contact_count += 1
-                if now - self._last_punch >= self.cooldown:
-                    self._punch(now)
-                    punched = True
-            self._last_touch = now
-        return punched
+        for side in SIDES:
+            if self._touch(side, now) and self._allowed(side, now):
+                self._punch(side, now)
+        return bool(self.punch_sides)
 
     def _tilt_only(self, magnitude, now):
-        """傾きだけで判定する方式: しきい値を超えたら1回。静止位置付近まで戻ると次を受け付ける。"""
+        """傾きだけで判定する方式: しきい値を超えたら1回。静止位置付近まで戻ると次を受け付ける。
+        手を使わないので左右の区別はなく、cooldown(共通)で間隔を空ける。"""
         if not self._armed and magnitude <= self.threshold * 0.5:
             self._armed = True
-        if self._armed and magnitude >= self.threshold and now - self._last_punch >= self.cooldown:
+        if self._armed and magnitude >= self.threshold and now - self._last_punch_any >= self._base_cooldown:
             self._armed = False
-            self._punch(now)
+            self.punch_count += 1
+            self._last_punch_any = now
+            for h in self._hand.values():
+                h.show_until = now + 0.5
+            self.punch_sides = ["L", "R"]  # 手は不明
             return True
         return False
 
@@ -259,6 +352,7 @@ class BodyMotion:
         if self._bag_x:
             self.bag_ref_x = statistics.median(self._bag_x)
         self._smooth = {}
+        self.auto_frames = None  # 最初の自動の基準測定は一度だけ。以降の測り直しは set_calibrating で行う
         self._reset()
 
     def normalized(self, reading, width, height):

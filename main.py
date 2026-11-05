@@ -17,6 +17,7 @@ from pathlib import Path
 import cv2
 
 from args import add_pipeline_args, check_args
+from logic import HoldKey
 from output import Reporter, draw_overlay
 from pipeline import Pipeline
 
@@ -26,6 +27,10 @@ WINDOW = "Punching Bag Detector (press Q to quit)"
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the punch detection on a recorded video.")
     parser.add_argument("video", help="Path to the input video, e.g. bag.mp4")
+    parser.add_argument("--calib-key", default="c",
+                        help="Key to hold in the video window to measure the reference again (default: c)")
+    parser.add_argument("--hold-timeout", type=float, default=0.7,
+                        help="Seconds without a key repeat after which the key counts as released (default: 0.7)")
     add_pipeline_args(parser)
     parser.add_argument("--no-display", action="store_true", help="Do not show the video window")
     parser.add_argument("--save-video", nargs="?", const="", default=None, metavar="PATH",
@@ -56,6 +61,10 @@ def main():
     reporter = Reporter(args.fmt, args.quiet, args.print_every, args.udp, args.udp_full, echo_sent=True)
     writer = path = last = None
     busy, frames, index, finished = 0.0, 0, 0, False
+    hold = HoldKey(args.calib_key, args.hold_timeout) if not args.no_display else None
+    was_held = False
+    if hold:
+        print(f"Hold '{args.calib_key.upper()}' in the video window to measure the reference (bag tilt / head / body) again.")
     try:
         while True:
             ok, frame = cap.read()
@@ -63,6 +72,11 @@ def main():
                 finished = True
                 break
             now = index / fps if fps > 0 else time.monotonic()  # 動画の時刻(処理速度に依存しない)
+            if hold:  # キーを押している間だけ基準を測り直す(離した瞬間に、その間の値が新しい基準になる)
+                held = hold.held(time.monotonic())
+                if held != was_held:
+                    pipeline.set_calibrating(held)
+                    was_held = held
             start = time.perf_counter()
             result = pipeline.process(frame, index, now)
             busy += time.perf_counter() - start
@@ -72,7 +86,8 @@ def main():
 
             if args.no_display and not args.save_video:
                 continue
-            draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result)
+            draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
+                         hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate" if hold else "")
             if args.save_video is not None:
                 if writer is None:
                     writer, path = open_writer(args, fps, frame)
@@ -80,7 +95,9 @@ def main():
             if not args.no_display:
                 last = frame.copy()
                 cv2.imshow(WINDOW, frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                key = cv2.waitKey(1)
+                hold.feed(key, time.monotonic())
+                if key & 0xFF == ord("q"):
                     break
 
         if writer is not None:
@@ -100,7 +117,9 @@ def main():
     if frames:
         ms = busy / frames * 1000
         print(f"Processing: {ms:.1f} ms/frame (~{1000 / ms:.0f} fps max, excluding display) on {pipeline.device.label}")
-    print(f"Punches: {pipeline.judge.punch_count}   Hits (contacts): {pipeline.judge.contact_count}")
+    j = pipeline.judge
+    print(f"Punches: {j.punch_count} (left {j.punch_counts['L']} / right {j.punch_counts['R']})   "
+          f"Hits (contacts): {j.contact_count}")
 
 
 if __name__ == "__main__":

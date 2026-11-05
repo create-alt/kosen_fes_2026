@@ -104,10 +104,12 @@ def main():
         # 表示があるときはキーを押している間、ないときは起動直後の数フレームで、頭・体の基準を測る
         pipeline = Pipeline(args, None if display else args.motion_calib_frames)
         reporter = Reporter(args.fmt, args.quiet, args.print_every, args.udp, args.udp_full)
-        hold = HoldKey(args.calib_key, args.hold_timeout) if display and pipeline.motion else None
+        hold = HoldKey(args.calib_key, args.hold_timeout) if display else None
+        was_held = False
         print("Running. Keep the bag still for the first moments (calibration).")
         if hold:
-            print(f"Hold '{args.calib_key.upper()}' in your guard stance to set the head / body reference.")
+            print(f"Hold '{args.calib_key.upper()}' in your guard stance (bag still) to set the reference; "
+                  f"you can hold it again at any time to measure it again.")
 
         last_id = index = frames = 0
         busy, report_start = 0.0, time.perf_counter()
@@ -117,8 +119,11 @@ def main():
                 print("No frame received from the camera. Stopping.")
                 break
             start = time.perf_counter()
-            if hold:
-                pipeline.motion.set_calibrating(hold.held(stamp))
+            if hold:  # キーを押した瞬間に測り始め、離した瞬間に、その間の値を新しい基準にする(いつでも何度でも)
+                held = hold.held(stamp)
+                if held != was_held:
+                    pipeline.set_calibrating(held)
+                    was_held = held
             result = pipeline.process(frame, index, stamp)
             busy += time.perf_counter() - start
             frames += 1
@@ -127,7 +132,7 @@ def main():
 
             if display:
                 draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
-                             hint=f"Hold '{args.calib_key.upper()}' in your guard stance")
+                             hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
                 cv2.imshow(WINDOW, frame)
                 key = cv2.waitKey(1)
                 if hold:

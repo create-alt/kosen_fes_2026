@@ -40,8 +40,14 @@ class Pipeline:
         mode = ("hand hit only" if args.threshold is None else f"hand hit + bag sway >= {args.threshold}deg") if use_hands \
             else f"bag sway only (>= {args.threshold if args.threshold is not None else 8.0}deg)"
         print("Punch judgment: " + mode)
+        if use_hands:
+            left = args.cooldown if args.cooldown_left is None else args.cooldown_left
+            right = args.cooldown if args.cooldown_right is None else args.cooldown_right
+            print(f"Interval per hand: left {left}s / right {right}s"
+                  + (f" (either hand: {args.cooldown_any}s)" if args.cooldown_any else ""))
         self.judge = PunchJudge(
             use_hands=use_hands, threshold=args.threshold, cooldown=args.cooldown,
+            cooldown_left=args.cooldown_left, cooldown_right=args.cooldown_right, cooldown_any=args.cooldown_any,
             calib_frames=args.calib_frames, hand_radius=args.hand_radius,
             hand_radius_ratio=args.hand_radius_ratio, window=args.contact_window,
             pre_window=args.contact_pre, release=args.contact_release, sway_max=args.sway_max,
@@ -51,10 +57,24 @@ class Pipeline:
             self.motion = BodyMotion(motion_auto_frames, args.motion_smooth, args.forward_direction)
         self.bag = self.person = None
 
+    @property
+    def calibrating(self):
+        """いま基準(バッグの傾き・頭・体)を測っている間か。"""
+        return self.judge.calibrating or bool(self.motion and self.motion.calibrating)
+
+    def set_calibrating(self, active):
+        """
+        active=True の間、バッグの傾き・頭・体の位置・バッグの位置を集め、False にしたとき、その値を新しい基準にする。
+        (起動直後に限らず、いつでも測り直せる。realtime.py / main.py では C キーを押している間。)
+        """
+        self.judge.set_calibrating(active)
+        if self.motion is not None:
+            self.motion.set_calibrating(active)
+
     def process(self, frame, index, now):
         self.bag, self.person = self.perception.process(frame)
-        hands = self.person.hands if self.person else []
-        punch = self.judge.update(self.bag, hands, now)
+        sides = self.person.hands_by_side if self.person else {}
+        punch = self.judge.update(self.bag, sides, now)
         reading = self.motion.update(self.person, self.bag.center[0] if self.bag else None) if self.motion else None
 
         h, w = frame.shape[:2]
@@ -68,7 +88,8 @@ class Pipeline:
             frame=index, time=now, size=(w, h),
             head=self.person.head if self.person else None,
             body=self.person.body_center if self.person else None,
-            hands=hands, hit=j.hit, punch=punch, punches=j.punch_count,
+            hands=list(sides.values()), hands_lr=dict(sides), hit=j.hit, hit_sides=j.hit_sides if j.use_hands else {},
+            punch=punch, punch_sides=list(j.punch_sides), punches=j.punch_count,
             bag_angle=self.bag.angle_deg if self.bag else None,
             bag_deviation=j.deviation if (self.bag and j.calibrated) else None,
             vertical=reading.vertical if reading else None, forward=reading.forward if reading else None,

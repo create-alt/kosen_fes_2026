@@ -157,7 +157,9 @@ python realtime.py [カメラ番号] [--no-display] [--stats] [--calib-key c]
 | `--hand-radius` | - | 手首を中心とする円の半径(画素)。指定が優先 |
 | `--hand-radius-ratio` | 0.5 | 未指定のとき、バッグ幅 × この値 |
 | `--threshold` | なし | **なし = 接触のみでパンチ**。数値(例 8)= 接触 + 傾きのずれが度数以上でパンチ。`--no-contact-gate` では傾きのみ(省略時 8) |
-| `--cooldown` | 0.5 | パンチ判定の最短間隔(秒) |
+| `--cooldown` | 0.5 | **同じ手**でパンチ判定してから、その手で次を判定するまでの最短間隔(秒)。**左右は別々に数える**ので、左→右→左…の連打は妨げられない |
+| `--cooldown-left` / `--cooldown-right` | `--cooldown` と同じ | 左手 / 右手だけ別の間隔にしたいとき |
+| `--cooldown-any` | 0(なし) | どちらの手でも、前のパンチから次までの最短間隔。両手が同時に触れて 2 回数えられるのを防ぎたいときだけ上げる |
 | `--calib-frames` | 30 | バッグの静止時の傾きを測るフレーム数 |
 | `--contact-window` | 0.3 | (`--threshold` 指定時)接触の後、この秒数以内の揺れをパンチとする |
 | `--contact-pre` | 0.1 | (`--threshold` 指定時)接触の直前、この秒数以内に始まった揺れも含める |
@@ -183,10 +185,13 @@ python realtime.py [カメラ番号] [--no-display] [--stats] [--calib-key c]
 | `--udp-full` | - | UDP にも全項目(手・punch・punches・バッグ・動き量)を送る |
 
 ### `main.py` のみ
+`--udp` を付けると、送るたびに送った JSON(正規化後の値)を `frame=46 sent: {"forward":0.428,"head":0.737,"feet":0.0,"punch":1}` の形で毎フレーム表示する(`--quiet` で止まる)。
+
 | 引数 | 意味 |
 |---|---|
 | `video` | 入力動画 |
 | `--no-display` | 画面を出さない(高速。最後に ms/frame とパンチ数を表示) |
+| `--calib-key` / `--hold-timeout` | 画面のあるとき、動画の中で C キーを押している間、基準を測り直す(`realtime.py` と同じ) |
 | `--save-video [PATH]` | 検出結果を重ねた動画を保存 |
 
 ### `realtime.py` のみ
@@ -197,8 +202,8 @@ python realtime.py [カメラ番号] [--no-display] [--stats] [--calib-key c]
 | `--no-mjpg` | - | MJPG を要求しない(映像が乱れるとき) |
 | `--no-display` | - | 画面なし(Ctrl+C で停止)。頭・体の基準は起動直後に自動で測る |
 | `--stats` | - | 2秒ごとに fps と ms/frame を表示 |
-| `--calib-key` | `c` | 押している間に頭・体の基準位置を測るキー |
-| `--hold-timeout` | 0.7 | キーを離したとみなすまでの秒数 |
+| `--calib-key` | `c` | 押している間、バッグの傾き・頭・体・バッグの位置の基準を測るキー(いつでも何度でも。離した瞬間に新しい基準になる) |
+| `--hold-timeout` | 0.7 | キーを離したとみなすまでの秒数(キーの自動リピートが止まってから) |
 
 ## 7. よく使う組み合わせ
 

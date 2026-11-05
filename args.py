@@ -42,7 +42,16 @@ def add_pipeline_args(parser):
                    help="Not given (default): a punch = a new hand contact only. With a number: a contact AND "
                         "a bag tilt change of at least this many degrees from rest (with --no-contact-gate / "
                         "--no-pose: tilt only, 8.0 if omitted)")
-    g.add_argument("--cooldown", type=float, default=0.5, help="Minimum seconds between punches (default: 0.5)")
+    g.add_argument("--cooldown", type=float, default=0.5,
+                   help="Minimum seconds between two punches of the SAME hand; left and right are counted "
+                        "separately, so alternating punches are not blocked (default: 0.5)")
+    g.add_argument("--cooldown-left", type=float, default=None,
+                   help="Interval for the left hand only (default: same as --cooldown)")
+    g.add_argument("--cooldown-right", type=float, default=None,
+                   help="Interval for the right hand only (default: same as --cooldown)")
+    g.add_argument("--cooldown-any", type=float, default=0.0,
+                   help="Minimum seconds between punches of EITHER hand; raise it only to avoid counting "
+                        "both hands touching at the same moment twice (default: 0 = off)")
     g.add_argument("--calib-frames", type=int, default=30, help="Frames used to measure the resting tilt (default: 30)")
     g.add_argument("--contact-window", type=float, default=0.3,
                    help="With --threshold: the bag must sway within this many seconds after a hit (default: 0.3)")

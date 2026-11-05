@@ -16,7 +16,7 @@ from typing import Optional
 
 import cv2
 
-from common import SKELETON
+from common import SKELETON, WRISTS
 
 
 @dataclass
@@ -27,8 +27,11 @@ class FrameResult:
     head: Optional[tuple] = None  # 頭の座標 (x, y)
     body: Optional[tuple] = None  # 体の重心の座標 (x, y)
     hands: list = field(default_factory=list)  # 手(手首)の座標
-    hit: Optional[bool] = None  # 手の円とバッグが重なっているか(None = 判定していない)
+    hands_lr: dict = field(default_factory=dict)  # {"L": (x, y), "R": (x, y)} 見えている手(L = 人の左手)
+    hit: Optional[bool] = None  # どちらかの手の円とバッグが重なっているか(None = 判定していない)
+    hit_sides: dict = field(default_factory=dict)  # {"L": bool, "R": bool} 手ごとのヒット
     punch: bool = False  # このフレームでパンチと判定したか
+    punch_sides: list = field(default_factory=list)  # パンチした手 ["L"] / ["R"] / ["L", "R"]
     punches: int = 0  # パンチの累計
     bag_angle: Optional[float] = None  # バッグの傾き(度)。見失ったら None
     bag_deviation: Optional[float] = None  # 静止時からのずれ(度)
@@ -53,8 +56,11 @@ class FrameResult:
             "head": pt(self.head),
             "body": pt(self.body),
             "hands": [pt(h) for h in self.hands],
+            "hands_lr": {s: pt(self.hands_lr.get(s)) for s in ("L", "R")},
             "hit": None if self.hit is None else int(self.hit),
+            "hit_lr": {s: int(self.hit_sides.get(s, False)) for s in ("L", "R")},
             "punch": int(self.punch),
+            "punch_hands": list(self.punch_sides),
             "punches": self.punches,
             "unity": self.to_udp_dict(),
             "bag": {"angle": num(self.bag_angle, 2), "deviation": num(self.bag_deviation, 2)},
@@ -78,7 +84,7 @@ class FrameResult:
 
         hit = "none" if self.hit is None else int(self.hit)
         return (f"frame={self.frame} t={self.time:.3f} head={pt(self.head)} body={pt(self.body)} "
-                f"hit={hit} punch={int(self.punch)}")
+                f"hit={hit} punch={int(self.punch)}" + (f"({''.join(self.punch_sides)})" if self.punch else ""))
 
 
 class Reporter:
@@ -128,11 +134,15 @@ class Reporter:
 
 # ------------------------------------------------------------------ 画面への描画
 
-HEAD, BODY, HAND, BONE = (255, 0, 255), (255, 255, 0), (0, 165, 255), (0, 200, 0)
+HEAD, BODY, BONE = (255, 0, 255), (255, 255, 0), (0, 200, 0)
+SIDE_COLOR = {"L": (255, 100, 0), "R": (0, 140, 255)}  # BGR: 左手 = 青、右手 = オレンジ
+SIDE_NAME = {"L": "Left", "R": "Right"}
 
 
 def draw_person(frame, person, radius=None, hit=False):
-    """骨格(線)、頭の位置、体の重心、手と接触を調べる円を描く。person が None なら何もしない。"""
+    """骨格(線)、頭の位置、体の重心、手と接触を調べる円を描く。person が None なら何もしない。
+    手首の点と円は左右で色を変える(左 = 青、右 = オレンジ)。バッグに触れている手は、円を太くして HIT と表示する。
+    hit: bool(両手)、または {"L": bool, "R": bool}。"""
     if person is None:
         return
     keys, ok = person.keypoints, person.keypoints[:, 2] >= person.kpt_conf
@@ -140,7 +150,7 @@ def draw_person(frame, person, radius=None, hit=False):
         if ok[a] and ok[b]:
             cv2.line(frame, (int(keys[a][0]), int(keys[a][1])), (int(keys[b][0]), int(keys[b][1])), BONE, 2)
     for i in range(len(keys)):
-        if ok[i] and i <= 12:
+        if ok[i] and i <= 12 and i not in WRISTS:
             cv2.circle(frame, (int(keys[i][0]), int(keys[i][1])), 3, (255, 255, 255), -1)
     if person.head is not None:
         x, y = (int(v) for v in person.head)
@@ -150,11 +160,16 @@ def draw_person(frame, person, radius=None, hit=False):
         x, y = (int(v) for v in person.body_center)
         cv2.drawMarker(frame, (x, y), BODY, cv2.MARKER_CROSS, 20, 2)
         cv2.putText(frame, "body", (x + 12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, BODY, 1)
-    for x, y in person.hands:
-        color = (0, 0, 255) if hit else HAND
-        cv2.circle(frame, (int(x), int(y)), 5, color, -1)
+    for side, (x, y) in person.hands_by_side.items():
+        color = SIDE_COLOR[side]
+        touching = bool(hit.get(side)) if isinstance(hit, dict) else bool(hit)
+        x, y = int(x), int(y)
+        cv2.circle(frame, (x, y), 8 if touching else 6, color, -1)
+        cv2.circle(frame, (x, y), 8 if touching else 6, (255, 255, 255), 1)  # 点が背景に埋もれないよう白い縁
         if radius:
-            cv2.circle(frame, (int(x), int(y)), int(radius), color, 2)  # この円にバッグが入るとヒット
+            cv2.circle(frame, (x, y), int(radius), color, 5 if touching else 2)  # この円にバッグが入るとヒット(太くなる)
+        cv2.putText(frame, side + (" HIT" if touching else ""), (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, color, 2)
 
 
 def draw_overlay(frame, bag, person, judge, motion, result, hint=""):
@@ -163,9 +178,12 @@ def draw_overlay(frame, bag, person, judge, motion, result, hint=""):
         cv2.drawContours(frame, [bag.contour], -1, (0, 255, 0), 2)
         cv2.line(frame, bag.axis[0], bag.axis[1], (255, 0, 0), 3)
         cv2.circle(frame, (int(bag.center[0]), int(bag.center[1])), 5, (0, 0, 255), -1)
-    draw_person(frame, person, judge.radius if judge.use_hands else None, bool(judge.hit))
+    draw_person(frame, person, judge.radius if judge.use_hands else None,
+                judge.hit_sides if judge.use_hands else False)
 
-    if not judge.calibrated and not judge.contact_only:
+    if judge.calibrating:
+        status = f"CALIBRATING (key held)... {len(judge._recal)} frames"
+    elif not judge.calibrated and not judge.contact_only:
         status = f"Calibrating... {judge.calib_progress}/{judge.calib_frames}"
     elif bag is None:
         status = "Bag lost"
@@ -176,8 +194,11 @@ def draw_overlay(frame, bag, person, judge, motion, result, hint=""):
         status = f"Tilt: {bag.angle_deg:+.1f}  Base: {judge.baseline:+.1f}  Dev: {judge.deviation:+.1f}{limit}"
     lines = [(status, (255, 255, 255), 0.65), (f"Punch count: {judge.punch_count}", (0, 255, 255), 0.8)]
     if judge.use_hands:
-        lines.append((f"Hit: {'YES' if judge.hit else 'no'}   contacts: {judge.contact_count}",
-                      (0, 0, 255) if judge.hit else (200, 200, 200), 0.6))
+        counts = judge.punch_counts
+        lines.append((f"Left  punches: {counts['L']}   hit: {'YES' if judge.hit_sides['L'] else 'no'}",
+                      SIDE_COLOR["L"], 0.6))
+        lines.append((f"Right punches: {counts['R']}   hit: {'YES' if judge.hit_sides['R'] else 'no'}",
+                      SIDE_COLOR["R"], 0.6))
     if motion is not None:
         if motion.calibrating:
             lines.append((f"Motion: calibrating... ({motion.progress} frames)", BODY, 0.6))
@@ -188,12 +209,17 @@ def draw_overlay(frame, bag, person, judge, motion, result, hint=""):
                                     ("Body fwd(+)/back(-)", result.forward_px, result.forward)):
                 text = f"{label}: lost" if px is None else f"{label}: {px:+.1f}px ({norm:+.2f} torso)"
                 lines.append((text, BODY, 0.6))
+    if hint and not judge.calibrating and (motion is None or not motion.calibrating):
+        lines.append((hint, (180, 180, 180), 0.5))
     y = 35
     for text, color, scale in lines:
         cv2.putText(frame, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2)
         y += 30 if scale > 0.7 else 28
-    if judge.should_show_punch(result.time):
-        ax, ay = (int(bag.center[0]), int(bag.center[1])) if bag is not None else (100, 160)
-        cv2.putText(frame, "PUNCH!", (max(20, ax - 80), max(45, ay - 40)), cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2, (0, 0, 255), 3)
+    ax, ay = (int(bag.center[0]), int(bag.box[1]) + 40) if bag is not None else (100, 160)  # バッグの上端の少し下
+    offset = 0
+    for side in ("L", "R"):  # 手ごとに、その手の色で表示(左右が続けてパンチしたら2行になる)
+        if judge.should_show_punch(result.time, side):
+            cv2.putText(frame, f"PUNCH! {side}", (max(20, ax - 80), max(45, ay - 60) + offset),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, SIDE_COLOR[side], 3)
+            offset += 42
     return frame
