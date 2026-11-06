@@ -58,7 +58,6 @@ public sealed class FightGameUI : MonoBehaviour
     private CombatFeedback feedback;
     private bool resultAnnounced;
     private float resultElapsed;
-    private double nextMenuPunchTime;
     private int selectedEnemy;
     private int selectedDifficulty = 1;
     private static readonly Color Accent = new Color(0.16f, 0.88f, 0.78f);
@@ -109,9 +108,6 @@ public sealed class FightGameUI : MonoBehaviour
             int choice = index;
             view.difficultyButtons[index].onClick.AddListener(() => ChooseDifficulty(choice));
         }
-        player.MenuPunchPressed += HandleMenuPunch;
-        view.start.GetComponentInChildren<Text>().text = "パンチで対戦をはじめる";
-        view.resultMenu.GetComponentInChildren<Text>().text = "パンチで敵選択へ";
         view.start.onClick.AddListener(StartBattle);
         view.retry.onClick.AddListener(Retry);
         view.resultMenu.onClick.AddListener(ReturnToMenu);
@@ -121,22 +117,6 @@ public sealed class FightGameUI : MonoBehaviour
         ChooseEnemy(0);
         RefreshSettings();
         view.result.SetActive(false);
-    }
-
-    private void HandleMenuPunch()
-    {
-        if (Time.unscaledTimeAsDouble < nextMenuPunchTime) return;
-        Button action = null;
-        if (view.result.activeInHierarchy) action = view.resultMenu;
-        else if (selection.IsSelecting && view.setup.activeInHierarchy) action = view.start;
-        if (action == null || !action.isActiveAndEnabled || !action.interactable) return;
-        nextMenuPunchTime = Time.unscaledTimeAsDouble + 0.5d;
-        action.onClick.Invoke();
-    }
-
-    private void OnDestroy()
-    {
-        if (player != null) player.MenuPunchPressed -= HandleMenuPunch;
     }
 
     public void ChooseEnemy(int index)

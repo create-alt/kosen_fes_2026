@@ -76,7 +76,7 @@ internal sealed class UdpTrackingInput : IDisposable
             lastPacketTime = now;
             bool pressed = packet.punch == 1f && !punchHeld;
             punchHeld = packet.punch == 1f;
-            player.ApplyUdpTracking(packet.forward, packet.head, pressed);
+            if (player.GameplayEnabled) player.ApplyUdpTracking(packet.forward, packet.head, pressed);
         }
 
         return now - lastPacketTime <= InputTimeout;
