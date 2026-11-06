@@ -26,12 +26,13 @@ public class PunchBotContoroller : MonoBehaviour
     private PlayerController trackedPlayer;
     private Vector3 punchPosition;
     private int punchesRemaining;
+    private int consecutivePunchCombos;
     private bool nextPunchIsJab = true;
     private bool previousCloseRange;
     private bool punchPredictionActive;
     private bool punchWindingUp;
     private bool closePressure;
-    private bool punchThreatened;
+    private bool punchResolved;
     private float punchRetreatLimit;
     private float punchWindupRemaining;
     private int queuedMissiles;
@@ -43,6 +44,7 @@ public class PunchBotContoroller : MonoBehaviour
     public static event System.Action<PunchBotContoroller> PunchPredictionEnded;
     public bool IsPunchPredicting => punchPredictionActive && attacking && punching && CanAttack();
     public Vector3 PunchPredictionPosition => punchPosition;
+    public Vector3 PunchPredictionBottom => new Vector3(punchPosition.x, trackedPlayer != null ? trackedPlayer.GetStandingPosition(0f).y : punchPosition.y, punchPosition.z);
     public Vector3 PunchIncomingDirection => transform.position - punchPosition;
     public Vector3 PlayerForwardDirection => trackedPlayer != null ? trackedPlayer.TrackingForwardDirection : Vector3.forward;
 
@@ -62,6 +64,7 @@ public class PunchBotContoroller : MonoBehaviour
         punchesRemaining = 0;
         nextPunchIsJab = true;
         previousCloseRange = false;
+        consecutivePunchCombos = 0;
 
         if (motion == null) return;
         motion.MissileLaunch += SpawnMissile;
@@ -105,6 +108,7 @@ public class PunchBotContoroller : MonoBehaviour
         if (battleVersion != trackedPlayer.BattleVersion)
         {
             battleVersion = trackedPlayer.BattleVersion;
+            consecutivePunchCombos = 0;
             CancelCurrentAttack();
             queuedMissiles = 0;
             nextMissileTime = 0d;
@@ -124,8 +128,7 @@ public class PunchBotContoroller : MonoBehaviour
             previousCloseRange = closeRange;
             punchesRemaining = 0;
             nextPunchIsJab = true;
-            if (attacking) CancelCurrentAttack();
-            attackRemaining = Mathf.Max(0f, rangeReactionTime);
+            if (!attacking && queuedMissiles == 0) attackRemaining = Mathf.Max(0f, rangeReactionTime);
         }
 
         if (punchWindingUp)
@@ -138,20 +141,16 @@ public class PunchBotContoroller : MonoBehaviour
         attackRemaining -= Time.deltaTime;
         if (attackRemaining > 0f) return;
 
-        if (trackedPlayer != null && trackedPlayer.IsInEnemyPunchRange)
-        {
-            FirePunch();
-        }
-        else if (trackedPlayer != null && trackedPlayer.IsInMissileRange)
-        {
-            FireMissile();
-        }
+        bool continuePunchCombo = punchesRemaining > 0;
+        bool choosePunch = closeRange && (continuePunchCombo || (consecutivePunchCombos == 0 && Random.value < 0.55f));
+        if (choosePunch) FirePunch();
+        else FireMissile();
         if (!attacking) attackRemaining = closeRange ? Mathf.Max(0.01f, punchRecovery) : Mathf.Max(0.01f, attackInterval);
     }
 
     public void FireMissile()
     {
-        if (!CanAttack() || attacking || motion.IsAttacking || !trackedPlayer.IsInMissileRange) return;
+        if (!CanAttack() || attacking || motion.IsAttacking) return;
         if (missilePrefab == null || missileSpawnPoint == null) return;
 
         activeDifficulty = CombatDifficulty.ForHealth(motion.CurrentHealth, motion.MaxHealth);
@@ -159,6 +158,7 @@ public class PunchBotContoroller : MonoBehaviour
         punchesRemaining = 0;
         punching = false;
         attacking = motion.PlayMissileAttack(missileCount);
+        if (attacking) consecutivePunchCombos = 0;
     }
 
     public void FirePunch()
@@ -167,6 +167,7 @@ public class PunchBotContoroller : MonoBehaviour
         closePressure = trackedPlayer.IsTooClose;
         if (punchesRemaining <= 0)
         {
+            consecutivePunchCombos++;
             activeDifficulty = CombatDifficulty.ForHealth(motion.CurrentHealth, motion.MaxHealth);
             int minimum = Mathf.Clamp(minimumComboPunches, 1, 3);
             int maximum = Mathf.Min(Mathf.Clamp(maximumComboPunches, minimum, 3), activeDifficulty.MaximumBurst);
@@ -183,7 +184,7 @@ public class PunchBotContoroller : MonoBehaviour
         punchPosition = trackedPlayer.GetStandingPosition(punchHeight);
         punchRetreatLimit = trackedPlayer.ForwardOffset - 0.12f;
         motion.PrioritizePunch = true;
-        punchThreatened = trackedPlayer.WouldReceiveAttack(punchPosition, punchPosition, punchHitRadius);
+        punchResolved = false;
         punching = true;
         attacking = true;
         punchWindingUp = true;
@@ -229,15 +230,15 @@ public class PunchBotContoroller : MonoBehaviour
     private void HitWithPunch()
     {
         EndPunchPrediction();
-        if (!attacking || !punching || !CanAttack()) return;
-        bool hit = trackedPlayer.ForwardOffset >= punchRetreatLimit && trackedPlayer.TryReceiveAttack(punchPosition, punchPosition, punchHitRadius);
-        if (!hit && punchThreatened) trackedPlayer.ReportDodge();
-        punchThreatened = false;
+        if (!attacking || !punching || !CanAttack() || punchResolved) return;
+        punchResolved = true;
+        bool hit = trackedPlayer.ForwardOffset >= punchRetreatLimit && trackedPlayer.TryReceiveLowAttack(punchPosition, punchPosition, punchHitRadius);
+        if (!hit) trackedPlayer.ReportDodge();
     }
 
     private void SpawnMissile()
     {
-        if (!attacking || punching || !CanAttack() || !trackedPlayer.IsInMissileRange) return;
+        if (!attacking || punching || !CanAttack()) return;
         if (missilePrefab == null || missileSpawnPoint == null) return;
 
         queuedMissiles++;

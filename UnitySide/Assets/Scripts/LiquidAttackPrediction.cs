@@ -94,6 +94,11 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
         line.localScale = Vector3.one;
         Color color = warning.Attack.PredictionColor;
         color.a = 0.9f;
+        if (warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.LiquidPunch)
+        {
+            AttackPredictionScreen.SetLowerBand(line, targetCamera, warning.Attack.PredictionPosition, warning.Attack.PredictionBottom, projectionDistance);
+            color.a = 0.3f;
+        }
         warning.Line.color = color;
         warning.Line.gameObject.SetActive(targetCamera.isActiveAndEnabled);
     }

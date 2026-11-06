@@ -14,6 +14,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
     {
         public StraightMissile Missile;
         public PunchBotContoroller PunchBot;
+        public HybridBossAttack Hybrid;
         public Vector3 Position;
         public Vector3 ForwardDirection;
         public Image Line;
@@ -34,6 +35,8 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         StraightMissile.PredictionEnded += HidePrediction;
         PunchBotContoroller.PunchPredictionStarted += ShowPunchPrediction;
         PunchBotContoroller.PunchPredictionEnded += HidePunchPrediction;
+        HybridBossAttack.MeleePredictionStarted += ShowHybridPrediction;
+        HybridBossAttack.MeleePredictionEnded += HideHybridPrediction;
         foreach (StraightMissile missile in FindObjectsByType<StraightMissile>(FindObjectsSortMode.None))
         {
             if (missile.IsPredicting) ShowPrediction(missile, missile.PredictionPosition);
@@ -41,6 +44,10 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         foreach (PunchBotContoroller punchBot in FindObjectsByType<PunchBotContoroller>(FindObjectsSortMode.None))
         {
             if (punchBot.IsPunchPredicting) ShowPunchPrediction(punchBot);
+        }
+        foreach (HybridBossAttack boss in FindObjectsByType<HybridBossAttack>(FindObjectsSortMode.None))
+        {
+            if (boss.IsMeleePredicting) ShowHybridPrediction(boss);
         }
     }
 
@@ -50,6 +57,8 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         StraightMissile.PredictionEnded -= HidePrediction;
         PunchBotContoroller.PunchPredictionStarted -= ShowPunchPrediction;
         PunchBotContoroller.PunchPredictionEnded -= HidePunchPrediction;
+        HybridBossAttack.MeleePredictionStarted -= ShowHybridPrediction;
+        HybridBossAttack.MeleePredictionEnded -= HideHybridPrediction;
 
         for (int index = predictions.Count - 1; index >= 0; index--) RemovePrediction(index);
     }
@@ -59,7 +68,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         for (int index = predictions.Count - 1; index >= 0; index--)
         {
             Prediction prediction = predictions[index];
-            bool active = prediction.Missile != null ? prediction.Missile.IsPredicting : prediction.PunchBot != null && prediction.PunchBot.IsPunchPredicting;
+            bool active = prediction.Missile != null ? prediction.Missile.IsPredicting : prediction.PunchBot != null ? prediction.PunchBot.IsPunchPredicting : prediction.Hybrid != null && prediction.Hybrid.IsMeleePredicting;
             if (!active || prediction.Line == null)
             {
                 RemovePrediction(index);
@@ -127,10 +136,18 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         line.anchorMax = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.95f) : new Vector2(cameraRect.x + cameraRect.width * 0.95f, y);
         line.pivot = new Vector2(0.5f, 0.5f);
         line.anchoredPosition = Vector2.zero;
-        float width = Mathf.Max(prediction.PunchBot != null ? 70f : 27f, lineWidth);
+        float width = Mathf.Max(prediction.PunchBot != null || prediction.Hybrid != null ? 70f : 27f, lineWidth);
         line.sizeDelta = vertical ? new Vector2(width, 0f) : new Vector2(0f, width);
         line.localRotation = Quaternion.identity;
         line.localScale = Vector3.one;
+        if (prediction.PunchBot != null || prediction.Hybrid != null)
+        {
+            Vector3 bottom = prediction.PunchBot != null ? prediction.PunchBot.PunchPredictionBottom : prediction.Hybrid.MeleePredictionBottom;
+            AttackPredictionScreen.SetLowerBand(line, targetCamera, prediction.Position, bottom, projectionDistance);
+            Color color = lineColor;
+            color.a = 0.3f;
+            prediction.Line.color = color;
+        }
         prediction.Line.gameObject.SetActive(targetCamera.isActiveAndEnabled);
     }
 
@@ -139,6 +156,27 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         for (int index = predictions.Count - 1; index >= 0; index--)
         {
             if (predictions[index].PunchBot == punchBot) RemovePrediction(index);
+        }
+    }
+
+    private void ShowHybridPrediction(HybridBossAttack boss)
+    {
+        if (predictionLineTemplate == null || targetCamera == null || !boss.IsMeleePredicting) return;
+        if (!AttackPredictionScreen.FacesSource(targetCamera, boss.MeleeIncomingDirection)) return;
+        foreach (Prediction existing in predictions)
+        {
+            if (existing.Hybrid == boss) return;
+        }
+        Prediction prediction = new Prediction { Hybrid = boss, Position = boss.MeleePredictionPosition, ForwardDirection = boss.PlayerForwardDirection, Line = CreateLine("HybridPunchPredictionLine") };
+        predictions.Add(prediction);
+        UpdateLine(prediction);
+    }
+
+    private void HideHybridPrediction(HybridBossAttack boss)
+    {
+        for (int index = predictions.Count - 1; index >= 0; index--)
+        {
+            if (predictions[index].Hybrid == boss) RemovePrediction(index);
         }
     }
 
