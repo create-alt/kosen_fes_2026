@@ -7,6 +7,7 @@
 動き量 : 頭の上下(上が正)と体の重心の前後(バッグへ近づくと正)の、基準(キャリブレーション時)からのずれ
 """
 
+import math
 import statistics
 from dataclasses import dataclass
 from typing import Optional
@@ -290,6 +291,8 @@ class MotionReading:
     forward_px: Optional[float] = None  # 体の重心の前後(バッグへ近づくと正)
     vertical: Optional[float] = None
     forward: Optional[float] = None
+    depth: Optional[float] = None  # 手前・奥: 手前 = -1、基準 = 0、奥 = +1(体幹の長さの比から)
+    size_ratio: Optional[float] = None  # いまの体幹の長さ ÷ 基準の体幹の長さ(1 より大きいほど手前)
 
 
 class BodyMotion:
@@ -302,8 +305,11 @@ class BodyMotion:
     None なら set_calibrating(True/False) で開始・終了(リアルタイム。押している間に集めた位置の中央値)。
     """
 
-    def __init__(self, auto_frames=None, smoothing=0.5, forward_direction="auto", min_samples=5):
+    def __init__(self, auto_frames=None, smoothing=0.5, forward_direction="auto", min_samples=5,
+                 depth_range=1.5):
+        """depth_range : 体幹の長さが基準の何倍(または 1/何倍)になったら、depth を -1(または +1)にするか(1 より大きい値)"""
         self.auto_frames, self.smoothing = auto_frames, smoothing
+        self.depth_range = max(1.01, depth_range)
         self.forward_direction, self.min_samples = forward_direction, min_samples
         self.calibrating = auto_frames is not None
         self.progress = 0  # キャリブレーションに使ったフレーム数(表示用)
@@ -410,7 +416,20 @@ class BodyMotion:
             setattr(reading, key + "_px", value)
             if self.scale:
                 setattr(reading, key, value / self.scale)
+        self._depth(reading, person)
         return reading
+
+    def _depth(self, reading, person):
+        """手前・奥を、体幹(肩の中点〜腰の中点)の長さの、基準との比から求める。距離に反比例して見かけの大きさが
+        変わるので、比の対数(= 距離の比の対数)を使い、手前と奥を対称にする。-ln(比) / ln(depth_range) を -1〜1 に収める。"""
+        if person is None or not person.torso_length or not self.scale:
+            return
+        raw = math.log(person.torso_length / self.scale)
+        previous = self._smooth.get("depth")
+        value = raw if previous is None else self.smoothing * raw + (1 - self.smoothing) * previous
+        self._smooth["depth"] = value
+        reading.size_ratio = math.exp(value)
+        reading.depth = max(-1.0, min(1.0, -value / math.log(self.depth_range)))
 
 
 class HoldKey:

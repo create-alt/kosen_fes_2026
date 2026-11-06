@@ -18,8 +18,8 @@ import argparse
 import shutil
 from pathlib import Path
 
-from _log.before_refactaring.classes import CLASSES
-from _log.before_refactaring.yolo_pose import DEFAULT_YOLO_WEIGHTS
+from classes import CLASSES
+from yolo_pose import DEFAULT_YOLO_WEIGHTS
 
 HERE = Path(__file__).parent
 

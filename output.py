@@ -6,7 +6,7 @@
     punch このフレームで「パンチした」と判定したか(ヒットの直後に、バッグが揺れたとき 1 回だけ 1)
 他に、手の座標、バッグの傾き、基準からの動き量、パンチの累計を JSON に含める。
 
-Unity へは --udp HOST:PORT で、毎フレーム {"forward","head","feet","punch"} の JSON を 1 パケット(UDP)で送る(全項目は --udp-full)(README の「Unity との通信」を参照)。
+Unity へは --udp HOST:PORT で、毎フレーム {"forward","head","depth","feet","punch"} の JSON を 1 パケット(UDP)で送る(全項目は --udp-full)(README の「Unity との通信」を参照)。
 """
 
 import json
@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import cv2
+import numpy as np
 
 from common import SKELETON, WRISTS
 
@@ -41,6 +42,8 @@ class FrameResult:
     forward_px: Optional[float] = None
     game_forward: Optional[float] = None  # Unity 用: バッグの位置(キャリブレーション時)=1、プレイヤー側の画面の端=0 の体の位置
     game_head: Optional[float] = None  # Unity 用: 画面の下=0、上=1 の頭の高さ
+    game_depth: Optional[float] = None  # Unity 用: 手前 = -1、キャリブレーション時 = 0、奥 = +1
+    size_ratio: Optional[float] = None  # いまの体幹の長さ ÷ 基準の体幹の長さ
 
     def to_dict(self):
         def pt(p):
@@ -67,16 +70,18 @@ class FrameResult:
             "motion": {
                 "vertical": num(self.vertical), "forward": num(self.forward),
                 "vertical_px": num(self.vertical_px, 1), "forward_px": num(self.forward_px, 1),
+                "size_ratio": num(self.size_ratio),
             },
         }
 
     def to_udp_dict(self):
-        """Unity へ送る内容: {"forward": 0〜1, "head": 0〜1, "feet": 0.0, "punch": 0/1}。feet は常に 0.0。
-        forward / head は、まだ測れていない(キャリブレーション前・人が見えない)ときは null。"""
+        """Unity へ送る内容: {"forward": 0〜1, "head": 0〜1, "depth": -1〜1, "feet": 0.0, "punch": 0/1}。feet は常に 0.0。
+        forward / head / depth は、まだ測れていない(キャリブレーション前・人が見えない)ときは null。"""
         def num(v):
-            return None if v is None else round(v, 3)
+            return None if v is None else round(v, 3) + 0.0  # + 0.0 で -0.0 を 0.0 にする
 
-        return {"forward": num(self.game_forward), "head": num(self.game_head), "feet": 0.0, "punch": int(self.punch)}
+        return {"forward": num(self.game_forward), "head": num(self.game_head), "depth": num(self.game_depth),
+                "feet": 0.0, "punch": int(self.punch)}
 
     def to_text(self):
         def pt(p):
@@ -95,7 +100,7 @@ class Reporter:
         fmt         : "text"(1行)または "json"
         quiet       : True ならコンソールには出さない(UDP 送信は続く)
         print_every : コンソールには N フレームに 1 回だけ出す(パンチのあったフレームは必ず出す)
-        udp         : "HOST:PORT"。指定すると毎フレーム JSON を送る(既定は forward / head / feet / punch だけ)
+        udp         : "HOST:PORT"。指定すると毎フレーム JSON を送る(既定は forward / head / depth / feet / punch だけ)
         udp_full    : True なら UDP にも全項目(to_dict)を送る
         echo_sent   : True なら、UDP で送った内容(JSON)を、送るたびにそのまま表示する(--quiet で止まる。
                       --print-every は無視して毎回。通常の1行表示の代わり)
@@ -133,6 +138,54 @@ class Reporter:
 
 
 # ------------------------------------------------------------------ 画面への描画
+
+
+def fit_to_window(frame, width, height):
+    """縦横比を保ったまま、フレームを width × height に収まる最大の大きさに拡大し、余白は黒で埋める。"""
+    h, w = frame.shape[:2]
+    if width < 2 or height < 2:
+        return frame
+    scale = min(width / w, height / h)
+    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR if scale > 1 else cv2.INTER_AREA)
+    canvas = np.zeros((height, width, 3), np.uint8)
+    x, y = (width - new_w) // 2, (height - new_h) // 2
+    canvas[y:y + new_h, x:x + new_w] = resized
+    return canvas
+
+
+class Screen:
+    """
+    表示ウィンドウ。既定は全画面で、画面いっぱいに(縦横比を保って)映像を大きく表示する。
+    F キーで全画面とウィンドウ表示を切り替え、Q または Esc で終了する(全画面には閉じるボタンが無いため)。
+    """
+
+    def __init__(self, title, fullscreen=True, size=(960, 720)):
+        self.title = title
+        cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(title, *size)
+        self.fullscreen = False
+        self.set_fullscreen(fullscreen)
+
+    def set_fullscreen(self, on):
+        cv2.setWindowProperty(self.title, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN if on else cv2.WINDOW_NORMAL)
+        self.fullscreen = on
+
+    def show(self, frame):
+        try:  # 現在のウィンドウの大きさに合わせて拡大(縦横比は保つ)。取れない環境ではそのまま表示
+            _, _, w, h = cv2.getWindowImageRect(self.title)
+            frame = fit_to_window(frame, w, h)
+        except cv2.error:
+            pass
+        cv2.imshow(self.title, frame)
+
+    def handle_key(self, key):
+        """キー入力(waitKey の値)を処理し、終了のキー(Q / Esc)なら True を返す。F で全画面を切り替える。"""
+        code = key & 0xFF
+        if code in (ord("f"), ord("F")):
+            self.set_fullscreen(not self.fullscreen)
+        return code in (ord("q"), ord("Q"), 27)
+
 
 HEAD, BODY, BONE = (255, 0, 255), (255, 255, 0), (0, 200, 0)
 SIDE_COLOR = {"L": (255, 100, 0), "R": (0, 140, 255)}  # BGR: 左手 = 青、右手 = オレンジ
@@ -209,6 +262,10 @@ def draw_overlay(frame, bag, person, judge, motion, result, hint=""):
                                     ("Body fwd(+)/back(-)", result.forward_px, result.forward)):
                 text = f"{label}: lost" if px is None else f"{label}: {px:+.1f}px ({norm:+.2f} torso)"
                 lines.append((text, BODY, 0.6))
+            if result.game_depth is not None:
+                side = "near" if result.game_depth < -0.05 else ("far" if result.game_depth > 0.05 else "ref")
+                lines.append((f"Depth: {result.game_depth:+.2f} ({side}) [torso x{result.size_ratio:.2f}]",
+                              BODY, 0.6))
     if hint and not judge.calibrating and (motion is None or not motion.calibrating):
         lines.append((hint, (180, 180, 180), 0.5))
     y = 35

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from _log.before_refactaring.bag_model import backproject, elongation_from_moments
+from bag_model import backproject, elongation_from_moments
 
 # back-projection の確率(0-255)をバッグ領域とみなすしきい値
 PROB_THRESHOLD = 127

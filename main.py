@@ -18,11 +18,15 @@ import cv2
 
 from args import add_pipeline_args, check_args
 from logic import HoldKey
+<<<<<<< HEAD
 from effects import ScreenView
 from output import Reporter
+=======
+from output import Reporter, Screen, draw_overlay
+>>>>>>> 7339cb8e4abcffd8e0774964323b40c52caa4bf5
 from pipeline import Pipeline
 
-WINDOW = "Punching Bag Detector (press Q to quit)"
+WINDOW = "Punching Bag Detector (Q: quit, F: fullscreen on/off)"
 
 
 def parse_args():
@@ -34,6 +38,7 @@ def parse_args():
                         help="Seconds without a key repeat after which the key counts as released (default: 0.7)")
     add_pipeline_args(parser)
     parser.add_argument("--no-display", action="store_true", help="Do not show the video window")
+    parser.add_argument("--windowed", action="store_true", help="Show in a normal window instead of full screen (F toggles)")
     parser.add_argument("--save-video", nargs="?", const="", default=None, metavar="PATH",
                         help="Also save the video with the overlay. No value = <input name>_result.mp4")
     parser.add_argument("--realtime", action="store_true",
@@ -65,6 +70,7 @@ def main():
     reporter = Reporter(args.fmt, args.quiet, args.print_every, args.udp, args.udp_full, echo_sent=True)
     writer = path = last = None
     busy, frames, index, finished = 0.0, 0, 0, False
+    screen = Screen(WINDOW, fullscreen=not args.windowed) if not args.no_display else None
     hold = HoldKey(args.calib_key, args.hold_timeout) if not args.no_display else None
     was_held = False
     view = ScreenView(args) if not (args.no_display and args.save_video is None) else None
@@ -115,6 +121,7 @@ def main():
                 writer.write(frame)
             if not args.no_display:
                 last = frame.copy()
+<<<<<<< HEAD
                 cv2.imshow(WINDOW, frame)
                 wait = 1
                 if sync:  # 処理が動画より速いときは、次のフレームの時刻まで待つ
@@ -123,16 +130,22 @@ def main():
                 hold.feed(key, time.monotonic())
                 view.key(key)
                 if key & 0xFF == ord("q"):
+=======
+                screen.show(frame)
+                key = cv2.waitKey(1)
+                hold.feed(key, time.monotonic())
+                if screen.handle_key(key):
+>>>>>>> 7339cb8e4abcffd8e0774964323b40c52caa4bf5
                     break
 
         if writer is not None:
             writer.release()
             print(f"Saved the result video: {path}")
         if finished and last is not None:  # 最後まで処理したら、最終フレームを表示したまま q を待つ
-            cv2.imshow(WINDOW, last)
-            print("Finished. Press q in the video window to close.")
-            while cv2.waitKey(30) & 0xFF != ord("q"):
-                pass
+            screen.show(last)
+            print("Finished. Press Q (or Esc) in the video window to close.")
+            while not screen.handle_key(cv2.waitKey(30)):
+                screen.show(last)  # ウィンドウの大きさを変えても追従する
     finally:
         cap.release()
         reporter.close()

@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from bag_pose import BagPose, BagTracker
-from _log.before_refactaring.classes import BAG, BODY, GLOVE, HEAD, Detection, key_from_model_name
+from classes import BAG, BODY, GLOVE, HEAD, Detection, key_from_model_name
 
 # 1フレームで採用する数。(グローブは両手ぶんの2つ。それ以外は1つ)
 MAX_PER_CLASS = {BAG: 1, GLOVE: 2, HEAD: 1, BODY: 1}
