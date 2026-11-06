@@ -55,6 +55,9 @@ public sealed class FightGameUI : MonoBehaviour
     [SerializeField] private PlayerController player;
     [SerializeField] private EnemySelectionController selection;
     [SerializeField] private Views view;
+    private CombatFeedback feedback;
+    private bool resultAnnounced;
+    private float resultElapsed;
     private int selectedEnemy;
     private int selectedDifficulty = 1;
     private static readonly Color Accent = new Color(0.16f, 0.88f, 0.78f);
@@ -71,6 +74,15 @@ public sealed class FightGameUI : MonoBehaviour
     private void Awake()
     {
         if (player == null || selection == null || view == null) return;
+        GameObject overlay = new GameObject("CombatFeedback", typeof(RectTransform), typeof(CanvasRenderer), typeof(CombatFeedback));
+        overlay.transform.SetParent(transform, false);
+        RectTransform overlayRect = (RectTransform)overlay.transform;
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+        feedback = overlay.GetComponent<CombatFeedback>();
+        feedback.Configure(player, view.resultTitle.font);
         FightSettings.Load();
         selectedDifficulty = FightSettings.Difficulty;
         view.keyboard.SetIsOnWithoutNotify(FightSettings.KeyboardTest);
@@ -170,6 +182,7 @@ public sealed class FightGameUI : MonoBehaviour
     public void StartBattle()
     {
         if (!selection.IsSelecting) return;
+        ResetPresentation();
         SaveSettings();
         player.SetMaxHealth(FightSettings.PlayerHealth);
         selection.SelectEnemy(selectedEnemy);
@@ -179,6 +192,7 @@ public sealed class FightGameUI : MonoBehaviour
 
     public void Retry()
     {
+        ResetPresentation();
         player.ResetBattle();
         if (UnityEngine.EventSystems.EventSystem.current != null) UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
         view.result.SetActive(false);
@@ -187,10 +201,18 @@ public sealed class FightGameUI : MonoBehaviour
 
     public void ReturnToMenu()
     {
+        ResetPresentation();
         SaveSettings();
         selection.ReturnToSelection();
         view.result.SetActive(false);
         RefreshHuds(true);
+    }
+
+    private void ResetPresentation()
+    {
+        resultAnnounced = false;
+        resultElapsed = 0f;
+        if (feedback != null) feedback.ResetEffects();
     }
 
     private void Update()
@@ -204,13 +226,25 @@ public sealed class FightGameUI : MonoBehaviour
             view.rushCount.text = "連打！ " + player.RushHits + " / " + player.RushGoal;
             view.rushTime.text = player.RushRemaining.ToString("0.0") + " 秒";
         }
-        if (finished && !view.result.activeSelf && (player.IsDead || !player.RushSucceeded)) BattleAudio.Play(player.IsDead ? FightSound.Defeat : FightSound.Victory);
-        view.result.SetActive(finished);
-        if (!finished) return;
+        if (!finished)
+        {
+            if (resultAnnounced) ResetPresentation();
+            view.result.SetActive(false);
+            return;
+        }
+        if (!resultAnnounced)
+        {
+            resultAnnounced = true;
+            resultElapsed = 0f;
+            if (player.IsDead || !player.RushSucceeded) BattleAudio.Play(player.IsDead ? FightSound.Defeat : FightSound.Victory);
+            if (!player.IsDead && feedback != null) feedback.PlayVictory();
+        }
+        resultElapsed += Time.unscaledDeltaTime;
+        view.result.SetActive(player.IsDead || resultElapsed >= 1.1f);
         RefreshHuds(true);
-        view.resultTitle.text = player.IsDead ? "DEFEAT" : player.RushSucceeded ? "RUSH K.O." : "VICTORY";
-        view.resultTitle.color = player.IsDead ? EnemyColor : Accent;
-        view.resultDetail.text = player.IsDead ? "もう一度、タイミングをつかもう。" : "相手を倒しました！";
+        view.resultTitle.text = player.IsDead ? "DEFEAT" : "CLEAR!";
+        view.resultTitle.color = player.IsDead ? EnemyColor : new Color(1f, 0.79f, 0.24f);
+        view.resultDetail.text = player.IsDead ? "もう一度、タイミングをつかもう。" : (player.RushSucceeded ? "ラッシュ成功！\n" : "") + EnemyName(selection.SelectedEnemy) + " を撃破！";
     }
 
     private void RefreshHuds(bool immediate)

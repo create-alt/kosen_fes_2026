@@ -14,6 +14,8 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     [SerializeField, Min(0.01f)] private float hitRadius = 0.14f;
     [SerializeField, Range(-1f, 1f)] private float nearAttackStartOffset = 0f;
     [SerializeField, Range(-1f, 1f)] private float farRangeOffset = -0.25f;
+    [SerializeField, Range(0f, 1f)] private float farHighJetChance = 0.8f;
+    [SerializeField, Range(0f, 1f)] private float middleHighJetChance = 0.7f;
     [SerializeField, Min(0.5f)] private float sideAttackDistance = 3f;
     [SerializeField, Min(0.1f)] private float additionalFlightTime = 1.5f;
     [SerializeField, Min(0.05f)] private float liquidPunchDuration = 0.45f;
@@ -54,8 +56,13 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private float activeChargeDuration = 1.6f;
     private float activeFlightDuration = 1.3f;
     private float activeRecoveryDuration = 1.8f;
+    private float highJetLifetime;
     private int battleVersion;
     private bool punchPoseActive;
+    private bool rangedPoseActive;
+    private Animator poseAnimator;
+    private Vector3 bodyRestScale;
+    private static readonly int IdleState = Animator.StringToHash("Base Layer.Idle");
     private Transform punchBody;
     private Transform punchArm;
     private Transform guardArm;
@@ -71,10 +78,12 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private void Awake()
     {
         enemy = GetComponent<DilatantEnemy>();
+        poseAnimator = GetComponent<Animator>();
     }
 
     private void OnEnable()
     {
+        CachePunchRig();
         battleVersion = player != null ? player.BattleVersion : 0;
         phase = Phase.Waiting;
         elapsed = 0f;
@@ -101,9 +110,63 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!punchPoseActive || pattern != AttackPattern.LiquidPunch) return;
-        if (phase == Phase.Charging) ApplyPunchPose(0f, ChargeProgress);
-        else if (phase == Phase.Flying) ApplyPunchPose(PunchExtension(), 1f);
+        if (enemy == null || enemy.IsDead) return;
+        if (poseAnimator != null && poseAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash != IdleState) return;
+        if (pattern == AttackPattern.LiquidPunch)
+        {
+            if (!punchPoseActive) return;
+            if (phase == Phase.Charging) ApplyPunchPose(0f, ChargeProgress);
+            else if (phase == Phase.Flying) ApplyPunchPose(PunchExtension(), 1f);
+        }
+        else if (phase == Phase.Charging || phase == Phase.Flying)
+        {
+            ApplyRangedPose();
+        }
+    }
+
+    private void ApplyRangedPose()
+    {
+        CachePunchRig();
+        if (punchBody == null || punchArm == null || guardArm == null) return;
+        rangedPoseActive = true;
+        float load = phase == Phase.Charging ? Mathf.SmoothStep(0f, 1f, ChargeProgress) : 1f - Mathf.SmoothStep(0f, 1f, elapsed / 0.3f);
+        float thrust = 0f;
+        if (phase == Phase.Flying)
+        {
+            thrust = elapsed < 0.12f ? Mathf.SmoothStep(0f, 1f, elapsed / 0.12f) : 1f - Mathf.SmoothStep(0f, 1f, (elapsed - 0.12f) / 0.43f);
+        }
+        punchBody.localPosition = bodyRestPosition + new Vector3(0f, -0.07f * load + 0.03f * thrust, -0.1f * load + 0.2f * thrust);
+        punchBody.localScale = Vector3.Scale(bodyRestScale, new Vector3(1f + 0.1f * load - 0.05f * thrust, 1f - 0.1f * load + 0.08f * thrust, 1f + 0.1f * load + 0.12f * thrust));
+        if (pattern == AttackPattern.HighJet)
+        {
+            punchBody.localRotation = bodyRestRotation * Quaternion.Euler(5f * load - 10f * thrust, 0f, 0f);
+            punchArm.localPosition = armRestPosition + Vector3.forward * (-0.09f * load + 0.16f * thrust);
+            punchArm.localRotation = armRestRotation * Quaternion.Euler(-65f * load * (1f - thrust) - 95f * thrust, -12f * load, -20f * load);
+            guardArm.localRotation = guardRestRotation * Quaternion.Euler(-65f * load * (1f - thrust) - 95f * thrust, 12f * load, 20f * load);
+        }
+        else
+        {
+            float side = Vector3.Dot(launchPosition - aimPosition, transform.right) >= 0f ? 1f : -1f;
+            punchBody.localRotation = bodyRestRotation * Quaternion.Euler(-5f * thrust, side * (32f * load - 42f * thrust), -side * 7f * load);
+            Quaternion sweep = Quaternion.Euler(-35f * load - 75f * thrust, side * (40f * load - 65f * thrust), -side * 38f * load);
+            Quaternion guard = Quaternion.Euler(-55f * load, 0f, 0f);
+            punchArm.localPosition = armRestPosition;
+            punchArm.localRotation = armRestRotation * (side > 0f ? sweep : guard);
+            guardArm.localRotation = guardRestRotation * (side > 0f ? guard : sweep);
+        }
+    }
+
+    private void RestoreRangedPose()
+    {
+        if (!rangedPoseActive) return;
+        rangedPoseActive = false;
+        if (punchBody == null || punchArm == null) return;
+        punchBody.localPosition = bodyRestPosition;
+        punchBody.localRotation = bodyRestRotation;
+        punchBody.localScale = bodyRestScale;
+        punchArm.localPosition = armRestPosition;
+        punchArm.localRotation = armRestRotation;
+        if (guardArm != null) guardArm.localRotation = guardRestRotation;
     }
 
     private float WorldPunchReach => (liquidPunchReach + punchStepDistance) * transform.TransformVector(Vector3.forward).magnitude;
@@ -145,7 +208,12 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         activeFlightDuration = Mathf.Max(flightDuration, difficulty.FlightTime);
         activeRecoveryDuration = Mathf.Max(recoveryDuration, difficulty.Recovery);
         SelectPattern();
-        if (pattern == AttackPattern.LiquidPunch) activeChargeDuration = Mathf.Max(1.5f, activeChargeDuration);
+        if (player.IsTooClose && pattern == AttackPattern.LiquidPunch)
+        {
+            activeChargeDuration = difficulty.PressureTelegraph;
+            activeRecoveryDuration = difficulty.PressureRecovery;
+        }
+        else if (pattern == AttackPattern.LiquidPunch) activeChargeDuration = Mathf.Max(1.5f, activeChargeDuration);
         LockTrajectory();
         SetColor(LiquidColor);
         effect.SetActive(true);
@@ -161,15 +229,12 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     {
         if (InPunchReach())
         {
-            pattern = Random.value < 0.5f ? AttackPattern.SideShot : AttackPattern.LiquidPunch;
-        }
-        else if (player.ForwardOffset <= Mathf.Min(farRangeOffset, nearAttackStartOffset))
-        {
-            pattern = AttackPattern.SideShot;
+            pattern = player.IsTooClose || Random.value >= 0.5f ? AttackPattern.LiquidPunch : AttackPattern.SideShot;
         }
         else
         {
-            pattern = Random.value < 0.5f ? AttackPattern.HighJet : AttackPattern.SideShot;
+            float chance = player.ForwardOffset <= Mathf.Min(farRangeOffset, nearAttackStartOffset) ? farHighJetChance : middleHighJetChance;
+            pattern = Random.value < chance ? AttackPattern.HighJet : AttackPattern.SideShot;
         }
     }
 
@@ -189,6 +254,13 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         aimPosition = player.GetStandingPosition(targetHeight);
         PredictionPosition = aimPosition;
         launchPosition.y = aimPosition.y;
+        if (pattern == AttackPattern.HighJet)
+        {
+            float aimDistance = Mathf.Max(0.01f, Vector3.Distance(launchPosition, aimPosition));
+            float rearDistance = Vector3.Distance(launchPosition, player.GetRearmostStandingPosition(targetHeight));
+            float clearance = Mathf.Max(0.5f, player.StandingBodyHeight);
+            highJetLifetime = activeFlightDuration * Mathf.Max(1.08f, (rearDistance + clearance) / aimDistance);
+        }
         Vector3 horizontal = Vector3.ProjectOnPlane(aimPosition - launchPosition, Vector3.up);
         if (horizontal.sqrMagnitude < 0.0001f) horizontal = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
         if (horizontal.sqrMagnitude < 0.0001f) horizontal = Vector3.forward;
@@ -257,7 +329,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
 
         float duration = activeFlightDuration;
-        float lifetime = pattern == AttackPattern.HighJet ? duration * 1.08f : duration + additionalFlightTime;
+        float lifetime = pattern == AttackPattern.HighJet ? highJetLifetime : duration + additionalFlightTime;
         float endTime = Mathf.Min(elapsed, lifetime);
         int steps = Mathf.Clamp(Mathf.CeilToInt((endTime - simulatedFlightTime) / 0.03f), 1, 128);
         float startTime = simulatedFlightTime;
@@ -333,6 +405,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         guardArm = transform.Find("Visual/Body/ArmL");
         if (punchBody == null || punchArm == null) return;
         bodyRestPosition = punchBody.localPosition;
+        bodyRestScale = punchBody.localScale;
         bodyRestRotation = punchBody.localRotation;
         armRestPosition = punchArm.localPosition;
         armRestRotation = punchArm.localRotation;
@@ -457,6 +530,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private void CancelAttack()
     {
         RestorePunchPose();
+        RestoreRangedPose();
         EndPrediction();
         if (effect != null) effect.SetActive(false);
         phase = Phase.Waiting;
