@@ -35,7 +35,7 @@ public class StraightMissile : MonoBehaviour
     public Vector3 IncomingDirection { get; private set; }
     public Vector3 PlayerForwardDirection { get; private set; } = Vector3.forward;
 
-    public void Initialize(float moveSpeed, float maxDistance, Vector3 moveDirection, Quaternion rotation, Transform playerTarget = null)
+    public void Initialize(float moveSpeed, float maxDistance, Vector3 moveDirection, Quaternion rotation, Transform playerTarget = null, bool directIncoming = false)
     {
         EndPrediction();
         maxSpeed = Mathf.Max(0.01f, moveSpeed);
@@ -47,6 +47,7 @@ public class StraightMissile : MonoBehaviour
         dodgeReported = false;
         BeginFlight(moveDirection, maxDistance, rotation);
         initialized = true;
+        if (directIncoming && target != null) BeginIncomingFlight();
     }
 
     public void CancelForPlayer(PlayerController owner)

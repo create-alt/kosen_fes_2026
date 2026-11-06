@@ -321,8 +321,12 @@ public class PlayerController : MonoBehaviour
         BattleAudio.Play(FightSound.PlayerPunch);
         if (!RushAttempted && OpponentHealth <= PunchDamage)
         {
+            float damageToRush = Mathf.Max(0f, OpponentHealth - Mathf.Max(1f, OpponentMaxHealth * 0.1f));
+            if (dilatantTarget != null) dilatantTarget.ReceiveRushPunch(damageToRush, false);
+            else if (target != null) target.ReceiveRushPunch(damageToRush, false);
+            ReportPunch(PunchResult.Hit);
+            BattleAudio.Play(FightSound.EnemyHit);
             BeginRush();
-            RegisterRushPunch();
             return;
         }
         float previousHealth = OpponentHealth;
@@ -331,7 +335,7 @@ public class PlayerController : MonoBehaviour
         bool hit = OpponentHealth < previousHealth;
         BattleAudio.Play(hit ? FightSound.EnemyHit : FightSound.Block);
         ReportPunch(hit ? PunchResult.Hit : PunchResult.Block);
-        if (!RushAttempted && OpponentHealth > 0f && OpponentHealth <= Mathf.Min(OpponentMaxHealth * 0.2f, PunchDamage * rushGoal)) BeginRush();
+        if (!RushAttempted && OpponentHealth > 0f && OpponentHealth <= OpponentMaxHealth * 0.1f) BeginRush();
     }
 
     private void ReportPunch(PunchResult result)
