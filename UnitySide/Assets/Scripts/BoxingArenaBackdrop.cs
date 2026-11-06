@@ -16,7 +16,16 @@ public sealed class BoxingArenaBackdrop : MonoBehaviour
         GameObject arena = new GameObject("BoxingArenaBackdrop");
         GameObject ring = GameObject.Find("BoxingRing");
         if (ring != null) arena.transform.position = ring.transform.position;
-        arena.AddComponent<BoxingArenaBackdrop>().Build();
+        try
+        {
+            arena.AddComponent<BoxingArenaBackdrop>().Build();
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogException(exception, arena);
+            Destroy(arena);
+            return;
+        }
         foreach (Camera camera in player.GetComponentsInChildren<Camera>(true))
         {
             if (camera.targetDisplay > 2) continue;
@@ -114,9 +123,19 @@ public sealed class BoxingArenaBackdrop : MonoBehaviour
 
     private Material CreateMaterial(string name, Color color, bool luminous = false)
     {
-        Shader shader = Shader.Find(luminous ? "Universal Render Pipeline/Unlit" : "Universal Render Pipeline/Lit");
-        if (shader == null) shader = Shader.Find(luminous ? "Unlit/Color" : "Standard");
-        Material material = new Material(shader) { name = name };
+        Material template = Resources.Load<Material>(luminous ? "FightArena/ArenaUnlit" : "FightArena/ArenaLit");
+        Material material;
+        if (template != null)
+        {
+            material = new Material(template) { name = name };
+        }
+        else
+        {
+            Shader shader = Shader.Find(luminous ? "Universal Render Pipeline/Unlit" : "Universal Render Pipeline/Lit");
+            if (shader == null) shader = Shader.Find(luminous ? "Unlit/Color" : "Standard");
+            if (shader == null) throw new System.InvalidOperationException("背景素材がありません。Assets/Resources/FightArenaを含めてビルドしてください。");
+            material = new Material(shader) { name = name };
+        }
         if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
         if (material.HasProperty("_Color")) material.SetColor("_Color", color);
         materials.Add(material);

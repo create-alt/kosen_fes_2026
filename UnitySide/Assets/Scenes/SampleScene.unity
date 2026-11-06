@@ -296,7 +296,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 45328631}
-  m_Enabled: 0
+  m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -4156,7 +4156,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 52
     m_Alignment: 4
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -4893,7 +4893,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 72
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -6410,7 +6410,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 68
     m_Alignment: 4
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -6760,7 +6760,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 58
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -8023,7 +8023,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 72
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -9074,6 +9074,10 @@ MonoBehaviour:
   target: {fileID: 1791124385}
   bodyCollider: {fileID: 45328633}
   enableKeyboardTest: 1
+  trackingUdpPort: 5005
+  udpPositionSmoothTime: 0.04
+  udpHeightSmoothTime: 0.025
+  lateralMoveDistance: 1.2
   keepCamerasFixed: 0
   testMoveSpeed: 1
   testBodySpeed: 1
@@ -9081,6 +9085,7 @@ MonoBehaviour:
   punchMinimumOffset: -0.25
   enemyPunchOffset: 0.25
   enemySurfacePadding: 0.02
+  maximumForwardTravelRatio: 0.85
   maxHealth: 100
   damageInvulnerability: 0.6
   rushDuration: 5
@@ -12629,6 +12634,56 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!1 &1964602097
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1964602099}
+  - component: {fileID: 1964602098}
+  m_Layer: 0
+  m_Name: StandaloneDisplayWindows
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1964602098
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1964602097}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2149232f9f4c4322a1dec0cd3cfd5da3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  openExtraWindows: 1
+  windowWidth: 960
+  windowHeight: 540
+  mirrorFrameRate: 30
+  flipDisplay1Vertically: 0
+  flipDisplay4Vertically: 0
+--- !u!4 &1964602099
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1964602097}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -1.972131, y: -5.080051, z: -5.8322353}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1967371166
 GameObject:
   m_ObjectHideFlags: 0
@@ -14270,8 +14325,9 @@ MonoBehaviour:
   hitRadius: 0.14
   nearAttackStartOffset: 0
   farRangeOffset: -0.25
-  sideAttackDistance: 3
-  additionalFlightTime: 1.5
+  farWaveChance: 0.8
+  middleWaveChance: 0.7
+  frontAttackDistance: 3
   liquidPunchDuration: 0.45
   liquidPunchImpactTime: 0.18
   liquidPunchReach: 0.9
@@ -14451,3 +14507,4 @@ SceneRoots:
   - {fileID: 163399050}
   - {fileID: 2131814790}
   - {fileID: 668567859}
+  - {fileID: 1964602099}

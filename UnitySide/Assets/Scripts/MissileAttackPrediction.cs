@@ -127,7 +127,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         line.anchorMax = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.95f) : new Vector2(cameraRect.x + cameraRect.width * 0.95f, y);
         line.pivot = new Vector2(0.5f, 0.5f);
         line.anchoredPosition = Vector2.zero;
-        float width = Mathf.Max(prediction.PunchBot != null ? 70f : 18f, lineWidth);
+        float width = Mathf.Max(prediction.PunchBot != null ? 70f : 27f, lineWidth);
         line.sizeDelta = vertical ? new Vector2(width, 0f) : new Vector2(0f, width);
         line.localRotation = Quaternion.identity;
         line.localScale = Vector3.one;

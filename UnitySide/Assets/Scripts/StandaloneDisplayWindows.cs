@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.EventSystems;
 
 public sealed class StandaloneDisplayWindows : MonoBehaviour
 {
@@ -27,6 +28,9 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
     private bool closing;
     private bool readbackErrorReported;
     private bool previousRunInBackground;
+    private IntPtr inputWindow;
+    private StandaloneWindowInputModule windowInput;
+    private readonly List<BaseInputModule> previousInputModules = new List<BaseInputModule>();
 
     private struct CameraState
     {
@@ -60,10 +64,13 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
 
         try
         {
-            mainMirror = new NativeWindow("FightEngineering - Display 1 (Mirror)", windowWidth, windowHeight);
-            fourthWindow = new NativeWindow("FightEngineering - Display 4", windowWidth, windowHeight);
+            inputWindow = NativeWindow.FindInputWindow();
+            mainMirror = new NativeWindow("FightEngineering - Display 1 (Mirror)", windowWidth, windowHeight, inputWindow);
+            fourthWindow = new NativeWindow("FightEngineering - Display 4", windowWidth, windowHeight, inputWindow);
+            mainMirror.FocusInputWindow();
             fourthTexture = CreateTexture(windowWidth, windowHeight, 24);
             BindFourthDisplay();
+            InstallWindowInput();
         }
         catch (Exception exception)
         {
@@ -123,6 +130,30 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
         }
     }
 
+    private void InstallWindowInput()
+    {
+        EventSystem system = EventSystem.current;
+        if (system == null) throw new InvalidOperationException("UI操作に必要なEventSystemがシーンにありません。");
+        foreach (BaseInputModule module in system.GetComponents<BaseInputModule>())
+        {
+            if (!module.enabled) continue;
+            previousInputModules.Add(module);
+            module.enabled = false;
+        }
+        windowInput = system.gameObject.AddComponent<StandaloneWindowInputModule>();
+        windowInput.Configure(ReadPointerPosition);
+    }
+
+    private Vector2? ReadPointerPosition()
+    {
+        if (closing || !NativeWindow.IsOurForegroundWindow(inputWindow)) return null;
+        if (NativeWindow.TryGetClientPointer(inputWindow, out Vector2 position, out Vector2 size))
+        {
+            return new Vector2(position.x * Screen.width / size.x, (size.y - position.y) * Screen.height / size.y);
+        }
+        return mainMirror != null ? mainMirror.ReadMirrorPointer() : null;
+    }
+
     private static RenderTexture CreateTexture(int width, int height, int depth)
     {
         RenderTexture texture = new RenderTexture(width, height, depth, RenderTextureFormat.ARGB32);
@@ -142,7 +173,7 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
     {
         fourthPending = false;
         if (closing || ReadbackFailed(request)) return;
-        fourthWindow.SetFrame(request, fourthTexture.width, fourthTexture.height, flipDisplay4Vertically);
+        fourthWindow.SetFrame(request, fourthTexture.width, fourthTexture.height, !flipDisplay4Vertically);
     }
 
     private bool ReadbackFailed(AsyncGPUReadbackRequest request)
@@ -165,6 +196,15 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
         closing = true;
         StopAllCoroutines();
         if (mainPending || fourthPending) AsyncGPUReadback.WaitAllRequests();
+        if (windowInput != null)
+        {
+            windowInput.enabled = false;
+            Destroy(windowInput);
+        }
+        foreach (BaseInputModule module in previousInputModules)
+        {
+            if (module != null) module.enabled = true;
+        }
         foreach (CanvasState state in canvases)
         {
             if (state.canvas == null) continue;
@@ -198,12 +238,19 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
         private static readonly WindowProcedure procedure = ProcessMessage;
         private static bool classRegistered;
         private IntPtr handle;
+        private readonly IntPtr inputWindow;
         private byte[] pixels;
         private BitmapInfo bitmap;
+        private IntPtr backBufferDc;
+        private IntPtr backBufferBitmap;
+        private IntPtr originalBitmap;
+        private int backBufferWidth;
+        private int backBufferHeight;
         public bool IsOpen => handle != IntPtr.Zero;
 
-        public NativeWindow(string title, int width, int height)
+        public NativeWindow(string title, int width, int height, IntPtr inputWindow)
         {
+            this.inputWindow = inputWindow;
             IntPtr module = GetModuleHandle(null);
             if (!classRegistered)
             {
@@ -213,7 +260,7 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
                     procedure = Marshal.GetFunctionPointerForDelegate(procedure),
                     instance = module,
                     cursor = LoadCursor(IntPtr.Zero, new IntPtr(32512)),
-                    background = new IntPtr(5),
+                    background = IntPtr.Zero,
                     name = ClassName
                 };
                 if (RegisterClassEx(ref definition) == 0)
@@ -222,10 +269,63 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
                 }
                 classRegistered = true;
             }
-            handle = CreateWindowEx(0, ClassName, title, 0x00CF0000, unchecked((int)0x80000000), unchecked((int)0x80000000), width, height, IntPtr.Zero, IntPtr.Zero, module, IntPtr.Zero);
+            handle = CreateWindowEx(0x08000000, ClassName, title, 0x00CF0000, unchecked((int)0x80000000), unchecked((int)0x80000000), width, height, IntPtr.Zero, IntPtr.Zero, module, IntPtr.Zero);
             if (!IsOpen) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             windows.Add(handle, this);
             ShowWindow(handle, 4);
+        }
+
+        public static IntPtr FindInputWindow()
+        {
+            IntPtr active = GetActiveWindow();
+            if (active != IntPtr.Zero) return active;
+            using (System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                return process.MainWindowHandle;
+            }
+        }
+
+        public static bool IsOurForegroundWindow(IntPtr mainWindow)
+        {
+            IntPtr foreground = GetForegroundWindow();
+            return foreground != IntPtr.Zero && (foreground == mainWindow || windows.ContainsKey(foreground));
+        }
+
+        public static bool TryGetClientPointer(IntPtr window, out Vector2 position, out Vector2 size)
+        {
+            position = Vector2.zero;
+            size = Vector2.zero;
+            if (window == IntPtr.Zero || !GetCursorPos(out Point point)) return false;
+            IntPtr underPointer = WindowFromPoint(point);
+            if (underPointer != window && !IsChild(window, underPointer)) return false;
+            if (!ScreenToClient(window, ref point) || !GetClientRect(window, out Rectangle rectangle)) return false;
+            if (rectangle.right <= 0 || rectangle.bottom <= 0 || point.x < 0 || point.y < 0 || point.x >= rectangle.right || point.y >= rectangle.bottom) return false;
+            position = new Vector2(point.x, point.y);
+            size = new Vector2(rectangle.right, rectangle.bottom);
+            return true;
+        }
+
+        public Vector2? ReadMirrorPointer()
+        {
+            if (pixels == null || !TryGetClientPointer(handle, out Vector2 position, out Vector2 size)) return null;
+            int height = Math.Abs(bitmap.height);
+            float scale = Mathf.Min(size.x / bitmap.width, size.y / height);
+            int widthOut = (int)(bitmap.width * scale);
+            int heightOut = (int)(height * scale);
+            if (widthOut <= 0 || heightOut <= 0) return null;
+            float x = position.x - ((int)size.x - widthOut) / 2;
+            float y = position.y - ((int)size.y - heightOut) / 2;
+            if (x < 0f || y < 0f || x >= widthOut || y >= heightOut) return null;
+            float normalizedY = y / heightOut;
+            if (instance != null && instance.flipDisplay1Vertically) normalizedY = 1f - normalizedY;
+            return new Vector2(x * Screen.width / widthOut, (1f - normalizedY) * Screen.height);
+        }
+
+        public void FocusInputWindow()
+        {
+            if (inputWindow == IntPtr.Zero) return;
+            SetForegroundWindow(inputWindow);
+            SetFocus(inputWindow);
         }
 
         public void SetFrame(AsyncGPUReadbackRequest request, int width, int height, bool flip)
@@ -262,18 +362,58 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
             try
             {
                 GetClientRect(handle, out Rectangle rectangle);
-                FillRect(dc, ref rectangle, GetStockObject(4));
-                if (pixels == null || rectangle.right <= 0 || rectangle.bottom <= 0) return;
-                int height = Math.Abs(bitmap.height);
-                float scale = Math.Min(rectangle.right / (float)bitmap.width, rectangle.bottom / (float)height);
-                int widthOut = (int)(bitmap.width * scale);
-                int heightOut = (int)(height * scale);
-                StretchDIBits(dc, (rectangle.right - widthOut) / 2, (rectangle.bottom - heightOut) / 2, widthOut, heightOut, 0, 0, bitmap.width, height, pixels, ref bitmap, 0, 0x00CC0020);
+                if (rectangle.right <= 0 || rectangle.bottom <= 0 || !EnsureBackBuffer(dc, rectangle.right, rectangle.bottom)) return;
+                FillRect(backBufferDc, ref rectangle, GetStockObject(4));
+                if (pixels != null)
+                {
+                    int height = Math.Abs(bitmap.height);
+                    float scale = Math.Min(rectangle.right / (float)bitmap.width, rectangle.bottom / (float)height);
+                    int widthOut = (int)(bitmap.width * scale);
+                    int heightOut = (int)(height * scale);
+                    StretchDIBits(backBufferDc, (rectangle.right - widthOut) / 2, (rectangle.bottom - heightOut) / 2, widthOut, heightOut, 0, 0, bitmap.width, height, pixels, ref bitmap, 0, 0x00CC0020);
+                }
+                BitBlt(dc, 0, 0, rectangle.right, rectangle.bottom, backBufferDc, 0, 0, 0x00CC0020);
             }
             finally
             {
                 EndPaint(handle, ref state);
             }
+        }
+
+        private bool EnsureBackBuffer(IntPtr dc, int width, int height)
+        {
+            if (backBufferDc != IntPtr.Zero && backBufferWidth == width && backBufferHeight == height) return true;
+            ReleaseBackBuffer();
+            backBufferDc = CreateCompatibleDC(dc);
+            if (backBufferDc == IntPtr.Zero) return false;
+            backBufferBitmap = CreateCompatibleBitmap(dc, width, height);
+            if (backBufferBitmap == IntPtr.Zero)
+            {
+                ReleaseBackBuffer();
+                return false;
+            }
+            originalBitmap = SelectObject(backBufferDc, backBufferBitmap);
+            if (originalBitmap == IntPtr.Zero || originalBitmap == new IntPtr(-1))
+            {
+                originalBitmap = IntPtr.Zero;
+                ReleaseBackBuffer();
+                return false;
+            }
+            backBufferWidth = width;
+            backBufferHeight = height;
+            return true;
+        }
+
+        private void ReleaseBackBuffer()
+        {
+            if (backBufferDc != IntPtr.Zero && originalBitmap != IntPtr.Zero) SelectObject(backBufferDc, originalBitmap);
+            if (backBufferBitmap != IntPtr.Zero) DeleteObject(backBufferBitmap);
+            if (backBufferDc != IntPtr.Zero) DeleteDC(backBufferDc);
+            backBufferDc = IntPtr.Zero;
+            backBufferBitmap = IntPtr.Zero;
+            originalBitmap = IntPtr.Zero;
+            backBufferWidth = 0;
+            backBufferHeight = 0;
         }
 
         [AOT.MonoPInvokeCallback(typeof(WindowProcedure))]
@@ -287,6 +427,10 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
                     return IntPtr.Zero;
                 }
                 if (message == 0x0014) return new IntPtr(1);
+                if (message == 0x0021)
+                {
+                    return new IntPtr(3);
+                }
                 if (message == 0x0010)
                 {
                     view.Dispose();
@@ -303,6 +447,7 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
             windows.Remove(previous);
             handle = IntPtr.Zero;
             DestroyWindow(previous);
+            ReleaseBackBuffer();
             pixels = null;
         }
 
@@ -322,6 +467,9 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
 
         [StructLayout(LayoutKind.Sequential)]
         private struct Rectangle { public int left, top, right, bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Point { public int x, y; }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct Message
@@ -364,6 +512,14 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
         [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr DispatchMessage(ref Message message);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr window);
+        [DllImport("user32.dll")] private static extern IntPtr GetActiveWindow();
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr window, ref Point point);
+        [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr window);
         [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr window);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadCursor(IntPtr instance, IntPtr name);
         [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr window, IntPtr rectangle, bool erase);
@@ -372,6 +528,12 @@ public sealed class StandaloneDisplayWindows : MonoBehaviour
         [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out Rectangle rectangle);
         [DllImport("user32.dll")] private static extern int FillRect(IntPtr dc, ref Rectangle rectangle, IntPtr brush);
         [DllImport("gdi32.dll")] private static extern IntPtr GetStockObject(int index);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int width, int height);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr item);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destination, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, uint operation);
         [DllImport("gdi32.dll")] private static extern int StretchDIBits(IntPtr dc, int x, int y, int width, int height, int sourceX, int sourceY, int sourceWidth, int sourceHeight, byte[] bits, ref BitmapInfo info, uint usage, uint operation);
     }
 #endif
