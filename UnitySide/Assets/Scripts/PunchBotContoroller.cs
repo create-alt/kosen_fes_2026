@@ -30,6 +30,7 @@ public class PunchBotContoroller : MonoBehaviour
     private bool previousCloseRange;
     private bool punchPredictionActive;
     private bool punchWindingUp;
+    private bool closePressure;
     private float punchWindupRemaining;
     private int queuedMissiles;
     private double nextMissileTime;
@@ -160,11 +161,17 @@ public class PunchBotContoroller : MonoBehaviour
     public void FirePunch()
     {
         if (!CanAttack() || attacking || motion.IsAttacking || !trackedPlayer.IsInEnemyPunchRange) return;
+        closePressure = trackedPlayer.IsTooClose;
         if (punchesRemaining <= 0)
         {
             activeDifficulty = CombatDifficulty.ForHealth(motion.CurrentHealth, motion.MaxHealth);
             int minimum = Mathf.Clamp(minimumComboPunches, 1, 3);
             int maximum = Mathf.Min(Mathf.Clamp(maximumComboPunches, minimum, 3), activeDifficulty.MaximumBurst);
+            if (closePressure)
+            {
+                maximum = Mathf.Min(Mathf.Clamp(maximumComboPunches, 1, 3), activeDifficulty.MaximumBurst + 1);
+                minimum = Mathf.Min(2, maximum);
+            }
             minimum = Mathf.Min(minimum, maximum);
             punchesRemaining = Random.Range(minimum, maximum + 1);
             nextPunchIsJab = true;
@@ -174,7 +181,7 @@ public class PunchBotContoroller : MonoBehaviour
         punching = true;
         attacking = true;
         punchWindingUp = true;
-        punchWindupRemaining = Mathf.Max(1.5f, activeDifficulty.Telegraph);
+        punchWindupRemaining = closePressure ? activeDifficulty.PressureTelegraph : Mathf.Max(1.5f, activeDifficulty.Telegraph);
         punchPredictionActive = true;
         PunchPredictionStarted?.Invoke(this);
     }
@@ -252,7 +259,9 @@ public class PunchBotContoroller : MonoBehaviour
         if (wasPunching)
         {
             bool continueCombo = motion != null && !motion.LastAttackInterrupted && trackedPlayer != null && trackedPlayer.IsInEnemyPunchRange && punchesRemaining > 0;
-            attackRemaining = continueCombo ? Mathf.Max(punchInterval, activeDifficulty.BurstSpacing) : Mathf.Max(punchRecovery, activeDifficulty.Recovery);
+            float spacing = closePressure ? activeDifficulty.PressureSpacing : activeDifficulty.BurstSpacing;
+            float recovery = closePressure ? activeDifficulty.PressureRecovery : Mathf.Max(punchRecovery, activeDifficulty.Recovery);
+            attackRemaining = continueCombo ? Mathf.Max(punchInterval, spacing) : recovery;
             if (!continueCombo) punchesRemaining = 0;
         }
         else

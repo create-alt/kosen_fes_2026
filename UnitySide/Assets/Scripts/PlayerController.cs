@@ -9,7 +9,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private BoxCollider bodyCollider;
     [SerializeField] private bool enableKeyboardTest = true;
     [SerializeField, Range(0, 65535)] private int trackingUdpPort = 5005;
+    [SerializeField, Min(0f)] private float udpPositionSmoothTime = 0.04f;
+    [SerializeField, Min(0f)] private float udpHeightSmoothTime = 0.025f;
     private UdpTrackingInput udpTracking;
+    private bool hasUdpTarget;
+    private float udpForwardTarget;
+    private float udpHeadTarget;
     [SerializeField] private bool keepCamerasFixed = true;
     [SerializeField, Min(0f)] private float testMoveSpeed = 1f;
     [SerializeField, Min(0f)] private float testBodySpeed = 1f;
@@ -17,6 +22,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField, Range(-1f, 1f)] private float punchMinimumOffset = -0.25f;
     [SerializeField, Range(-1f, 1f)] private float enemyPunchOffset = 0.5f;
     [SerializeField, Min(0f)] private float enemySurfacePadding = 0.02f;
+    [SerializeField, Range(0.1f, 1f)] private float maximumForwardTravelRatio = 0.85f;
 
     [SerializeField, Min(1f)] private float maxHealth = 100f;
     [SerializeField, Min(0f)] private float damageInvulnerability = 0.6f;
@@ -56,9 +62,12 @@ public class PlayerController : MonoBehaviour
     public bool GameplayEnabled => gameplayEnabled;
     public bool IsTooFar => ForwardOffset < punchMinimumOffset;
     public bool IsInEnemyPunchRange => ForwardOffset >= Mathf.Max(punchMinimumOffset, enemyPunchOffset);
+    public bool IsTooClose => IsInEnemyPunchRange && ForwardOffset >= 0.75f;
+    private float TrackingTravel => forwardDistance * (ForwardOffset > 0f ? maximumForwardTravelRatio : 1f);
     public bool IsInMissileRange => !IsInEnemyPunchRange;
     public float AttackInput { get; private set; }
     public Vector3 TrackingForwardDirection => forwardDirection;
+    public event Action<PunchResult, Vector3> PunchResolved;
     public event Action Damaged;
     public event Action HealthChanged;
     public float CurrentHealth { get; private set; } = 100f;
@@ -94,6 +103,7 @@ public class PlayerController : MonoBehaviour
     {
         udpTracking?.Dispose();
         udpTracking = null;
+        hasUdpTarget = false;
         AttackInput = 0f;
     }
 
@@ -104,7 +114,11 @@ public class PlayerController : MonoBehaviour
         if (keyboard != null && keyboard.rKey.wasPressedThisFrame && (gameplayEnabled || IsDead)) ResetBattle();
         try
         {
-            if (udpTracking != null && udpTracking.Read(this)) return;
+            if (udpTracking != null && udpTracking.Read(this))
+            {
+                AdvanceUdpTracking(Time.deltaTime);
+                return;
+            }
         }
         catch (SocketException exception)
         {
@@ -112,6 +126,7 @@ public class PlayerController : MonoBehaviour
             udpTracking.Dispose();
             udpTracking = null;
         }
+        hasUdpTarget = false;
         if (keyboard == null || !gameplayEnabled) return;
         if (!enableKeyboardTest) return;
 
@@ -149,11 +164,24 @@ public class PlayerController : MonoBehaviour
 
     internal void ApplyUdpTracking(float forward, float head, bool punched)
     {
-        SetTrackingOffsets(forward * 2f - 1f, Mathf.Max(head * 1.5f, MinimumNormalizedHeight()), 0f);
+        if (!gameplayEnabled) return;
+        udpForwardTarget = forward * 2f - 1f;
+        udpHeadTarget = Mathf.Max(head * 1.5f, MinimumNormalizedHeight());
+        hasUdpTarget = true;
         SetAttackInput(0f);
         if (!punched) return;
         SetAttackInput(1f);
         SetAttackInput(0f);
+    }
+
+    private void AdvanceUdpTracking(float delta)
+    {
+        if (!gameplayEnabled || !hasUdpTarget) return;
+        float forwardBlend = udpPositionSmoothTime > 0f ? 1f - Mathf.Exp(-Mathf.Max(0f, delta) / udpPositionSmoothTime) : 1f;
+        float headBlend = udpHeightSmoothTime > 0f ? 1f - Mathf.Exp(-Mathf.Max(0f, delta) / udpHeightSmoothTime) : 1f;
+        float forward = Mathf.Lerp(ForwardOffset, udpForwardTarget, forwardBlend);
+        float head = Mathf.Lerp(UpperBodyOffset, udpHeadTarget, headBlend);
+        SetTrackingOffsets(forward, head, 0f);
     }
 
     public bool SetTrackingOffsets(float forwardOffset, float upperPosition, float lowerPosition)
@@ -173,7 +201,7 @@ public class PlayerController : MonoBehaviour
         ForwardOffset = forwardOffset;
         UpperBodyOffset = upperPosition;
         LowerBodyOffset = lowerPosition;
-        transform.position = originPosition + forwardDirection * (forwardOffset * forwardDistance) + Vector3.up * centerMovement;
+        transform.position = originPosition + forwardDirection * (forwardOffset * TrackingTravel) + Vector3.up * centerMovement;
 
         if (bodyCollider != null && originalBodyHeight > 0f)
         {
@@ -188,13 +216,18 @@ public class PlayerController : MonoBehaviour
 
     public void ResetTrackingOffsets()
     {
+        hasUdpTarget = false;
         SetTrackingOffsets(0f, 1f, 0f);
     }
 
     public void SetGameplayEnabled(bool enabled)
     {
         gameplayEnabled = enabled;
-        if (!enabled) AttackInput = 0f;
+        if (!enabled)
+        {
+            hasUdpTarget = false;
+            AttackInput = 0f;
+        }
     }
 
     public void SetKeyboardTestEnabled(bool enabled)
@@ -266,7 +299,11 @@ public class PlayerController : MonoBehaviour
             return;
         }
         BattleAudio.Play(FightSound.PlayerPunch);
-        if (IsTooFar) return;
+        if (IsTooFar)
+        {
+            ReportPunch(PunchResult.Miss);
+            return;
+        }
         if (!RushAttempted && OpponentHealth <= PunchDamage)
         {
             BeginRush();
@@ -276,8 +313,17 @@ public class PlayerController : MonoBehaviour
         float previousHealth = OpponentHealth;
         if (dilatantTarget != null && dilatantTarget.isActiveAndEnabled) dilatantTarget.ReceivePunch();
         else if (target != null && target.isActiveAndEnabled) target.ReceiveDamage(PunchDamage);
-        BattleAudio.Play(OpponentHealth < previousHealth ? FightSound.EnemyHit : FightSound.Block);
+        bool hit = OpponentHealth < previousHealth;
+        BattleAudio.Play(hit ? FightSound.EnemyHit : FightSound.Block);
+        ReportPunch(hit ? PunchResult.Hit : PunchResult.Block);
         if (!RushAttempted && OpponentHealth > 0f && OpponentHealth <= Mathf.Min(OpponentMaxHealth * 0.2f, PunchDamage * rushGoal)) BeginRush();
+    }
+
+    private void ReportPunch(PunchResult result)
+    {
+        Transform opponent = selectedOpponent != null ? selectedOpponent : target != null ? target.transform : dilatantTarget != null ? dilatantTarget.transform : null;
+        Vector3 position = opponent != null ? opponent.position + Vector3.up * StandingBodyHeight * 0.65f : GetStandingPosition(0.65f);
+        PunchResolved?.Invoke(result, position);
     }
 
     private void BeginRush()
@@ -300,6 +346,7 @@ public class PlayerController : MonoBehaviour
         if (dilatantTarget != null) dilatantTarget.ReceiveRushPunch(PunchDamage, finishing);
         else if (target != null) target.ReceiveRushPunch(PunchDamage, finishing);
         BattleAudio.Play(FightSound.RushHit);
+        ReportPunch(PunchResult.Hit);
         if (!finishing) return;
         IsFinisherRush = false;
         RushSucceeded = true;
@@ -322,7 +369,13 @@ public class PlayerController : MonoBehaviour
     {
         if (!initialized) CaptureOrigin();
         Vector3 center = originPosition + transform.TransformVector(bodyCenterLocal);
-        return center + forwardDirection * (ForwardOffset * forwardDistance) + Vector3.up * (originalBodyHeight * (normalizedHeight - 0.5f));
+        return center + forwardDirection * (ForwardOffset * TrackingTravel) + Vector3.up * (originalBodyHeight * (normalizedHeight - 0.5f));
+    }
+
+    public Vector3 GetRearmostStandingPosition(float normalizedHeight)
+    {
+        Vector3 current = GetStandingPosition(normalizedHeight);
+        return current - forwardDirection * (ForwardOffset * TrackingTravel + forwardDistance);
     }
 
     public bool TryReceiveAttack(Vector3 start, Vector3 end, float radius)
@@ -377,6 +430,7 @@ public class PlayerController : MonoBehaviour
         RushSucceeded = false;
         RushHits = 0;
         RushRemaining = 0f;
+        hasUdpTarget = false;
         BattleVersion++;
         CurrentHealth = Mathf.Max(1f, maxHealth);
         invulnerableUntil = double.NegativeInfinity;

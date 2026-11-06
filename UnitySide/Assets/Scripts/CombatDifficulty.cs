@@ -9,6 +9,9 @@ public readonly struct CombatDifficulty
     public float BurstSpacing { get; }
     public int MaximumBurst { get; }
     public float MissileSpeed { get; }
+    public float PressureTelegraph => Mathf.Max(0.75f, Telegraph * 0.55f);
+    public float PressureRecovery => Mathf.Max(0.45f, Recovery * 0.4f);
+    public float PressureSpacing => BurstSpacing * 0.4f;
 
     private CombatDifficulty(int stage)
     {
