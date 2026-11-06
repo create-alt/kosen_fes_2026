@@ -1,13 +1,12 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class StraightMissile : MonoBehaviour
 {
     [SerializeField, Min(0f)] private float waitTime = 1f;
     [SerializeField, Min(0.01f)] private float acceleration = 5f;
-    [SerializeField] private float minHeight = -0.5f;
-    [SerializeField] private float maxHeight = 0.5f;
-    [SerializeField, Min(0.01f)] private float sideDistance = 5f;
+    [FormerlySerializedAs("sideDistance"), SerializeField, Min(0.01f)] private float incomingDistance = 5f;
     [SerializeField, Min(0.01f)] private float predictionTime = 1f;
     [SerializeField, Min(0f)] private float hitRadius = 0.06f;
     [SerializeField] private GameObject player;
@@ -21,11 +20,12 @@ public class StraightMissile : MonoBehaviour
     private Transform target;
     private PlayerController targetPlayer;
     private bool initialized;
-    private bool flyingHorizontally;
+    private bool flyingIncoming;
     private bool showingPrediction;
     private float minimumPredictionTime = 1.6f;
     private Transform attackOwner;
     private int battleVersion;
+    private bool threatenedAtLock;
 
     public static event Action<StraightMissile, Vector3> PredictionStarted;
     public static event Action<StraightMissile> PredictionEnded;
@@ -41,7 +41,8 @@ public class StraightMissile : MonoBehaviour
         target = playerTarget != null ? playerTarget : (player != null ? player.transform : null);
         targetPlayer = target != null ? target.GetComponentInParent<PlayerController>() : null;
         battleVersion = targetPlayer != null ? targetPlayer.BattleVersion : 0;
-        flyingHorizontally = false;
+        flyingIncoming = false;
+        threatenedAtLock = false;
         BeginFlight(moveDirection, maxDistance, rotation);
         initialized = true;
     }
@@ -71,7 +72,7 @@ public class StraightMissile : MonoBehaviour
             waitRemaining -= Time.deltaTime;
             if (waitRemaining <= 0f)
             {
-                if (flyingHorizontally) BattleAudio.Play(FightSound.Missile, targetPlayer != null ? Vector3.Dot(targetPlayer.transform.right, IncomingDirection.normalized) : 0f);
+                if (flyingIncoming) BattleAudio.Play(FightSound.Missile, targetPlayer != null ? Vector3.Dot(targetPlayer.transform.right, IncomingDirection.normalized) : 0f);
                 EndPrediction();
             }
             return;
@@ -86,7 +87,7 @@ public class StraightMissile : MonoBehaviour
         transform.position += direction * distance;
         traveled += distance;
 
-        if (flyingHorizontally && targetPlayer != null && targetPlayer.TryReceiveAttack(previousPosition, transform.position, hitRadius))
+        if (flyingIncoming && targetPlayer != null && targetPlayer.TryReceiveAttack(previousPosition, transform.position, hitRadius))
         {
             initialized = false;
             EndPrediction();
@@ -96,31 +97,32 @@ public class StraightMissile : MonoBehaviour
 
         if (traveled < travelDistance) return;
 
-        if (flyingHorizontally || target == null)
+        if (flyingIncoming || target == null)
         {
+            if (flyingIncoming && threatenedAtLock && targetPlayer != null) targetPlayer.ReportDodge();
             initialized = false;
             Destroy(gameObject);
             return;
         }
 
-        BeginHorizontalFlight();
+        BeginIncomingFlight();
     }
 
-    private void BeginHorizontalFlight()
+    private void BeginIncomingFlight()
     {
-        int side = UnityEngine.Random.value < 0.5f ? -1 : 1;
-        float height = UnityEngine.Random.Range(Mathf.Min(minHeight, maxHeight), Mathf.Max(minHeight, maxHeight));
-        float horizontalDistance = Mathf.Max(0.01f, sideDistance);
         Vector3 targetPosition = target.position;
-        float attackY = targetPlayer != null ? targetPlayer.GetStandingPosition(UnityEngine.Random.Range(0.2f, 0.35f)).y : targetPosition.y + height;
-        Vector3 moveDirection = side < 0 ? Vector3.right : Vector3.left;
-
-        transform.position = new Vector3(targetPosition.x + side * horizontalDistance, attackY, targetPosition.z);
+        float attackY = targetPlayer != null ? targetPlayer.GetStandingPosition(UnityEngine.Random.Range(0.4f, 0.65f)).y : targetPosition.y;
+        Vector3 forward = targetPlayer != null ? targetPlayer.TrackingForwardDirection : Vector3.forward;
         PredictionPosition = new Vector3(targetPosition.x, attackY, targetPosition.z);
+        transform.position = PredictionPosition + forward * Mathf.Max(3f, incomingDistance);
+        Vector3 moveDirection = -forward;
+        float aimDistance = Vector3.Distance(transform.position, PredictionPosition);
+        float clearance = targetPlayer != null ? Mathf.Max(0.5f, targetPlayer.StandingBodyHeight) : 1f;
+        threatenedAtLock = targetPlayer != null && targetPlayer.WouldReceiveAttack(transform.position, PredictionPosition + moveDirection * clearance, hitRadius);
         IncomingDirection = transform.position - PredictionPosition;
         PlayerForwardDirection = targetPlayer != null ? targetPlayer.TrackingForwardDirection : Vector3.forward;
-        flyingHorizontally = true;
-        BeginFlight(moveDirection, horizontalDistance * 2f, Quaternion.LookRotation(moveDirection, Vector3.up));
+        flyingIncoming = true;
+        BeginFlight(moveDirection, aimDistance + clearance, Quaternion.LookRotation(moveDirection, Vector3.up));
         waitRemaining = Mathf.Max(minimumPredictionTime, predictionTime);
         showingPrediction = true;
         PredictionStarted?.Invoke(this, transform.position);

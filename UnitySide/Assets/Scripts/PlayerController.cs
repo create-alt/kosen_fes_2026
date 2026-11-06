@@ -15,6 +15,8 @@ public class PlayerController : MonoBehaviour
     private bool hasUdpTarget;
     private float udpForwardTarget;
     private float udpHeadTarget;
+    private float udpDepthTarget;
+    [SerializeField, Min(0.1f)] private float lateralMoveDistance = 1.2f;
     [SerializeField] private bool keepCamerasFixed = true;
     [SerializeField, Min(0f)] private float testMoveSpeed = 1f;
     [SerializeField, Min(0f)] private float testBodySpeed = 1f;
@@ -57,10 +59,13 @@ public class PlayerController : MonoBehaviour
     }
 
     public float ForwardOffset { get; private set; }
+    public float DepthOffset { get; private set; }
+    public float TrackingLateralRange => lateralMoveDistance;
+    public Vector3 TrackingRightDirection => Vector3.Cross(Vector3.up, forwardDirection).normalized;
     public float UpperBodyOffset { get; private set; } = 1f;
     public float LowerBodyOffset { get; private set; }
     public bool GameplayEnabled => gameplayEnabled;
-    public bool IsTooFar => ForwardOffset < punchMinimumOffset;
+    public bool IsTooFar => false;
     public bool IsInEnemyPunchRange => ForwardOffset >= Mathf.Max(punchMinimumOffset, enemyPunchOffset);
     public bool IsTooClose => IsInEnemyPunchRange && ForwardOffset >= 0.75f;
     private float TrackingTravel => forwardDistance * (ForwardOffset > 0f ? maximumForwardTravelRatio : 1f);
@@ -68,7 +73,7 @@ public class PlayerController : MonoBehaviour
     public float AttackInput { get; private set; }
     public Vector3 TrackingForwardDirection => forwardDirection;
     public event Action<PunchResult, Vector3> PunchResolved;
-    public event Action MenuPunchPressed;
+    public event Action Dodged;
     public event Action Damaged;
     public event Action HealthChanged;
     public float CurrentHealth { get; private set; } = 100f;
@@ -128,10 +133,11 @@ public class PlayerController : MonoBehaviour
             udpTracking = null;
         }
         hasUdpTarget = false;
-        if (keyboard == null || !enableKeyboardTest) return;
+        if (keyboard == null || !gameplayEnabled) return;
+        if (!enableKeyboardTest) return;
+
         if (keyboard.spaceKey.wasPressedThisFrame) SetAttackInput(1f);
         if (keyboard.spaceKey.wasReleasedThisFrame) SetAttackInput(0f);
-        if (!gameplayEnabled) return;
 
         if (keyboard.homeKey.wasPressedThisFrame)
         {
@@ -154,7 +160,8 @@ public class PlayerController : MonoBehaviour
             lower = Mathf.Clamp(lower, 0f, upper - MinimumNormalizedHeight());
         }
 
-        SetTrackingOffsets(forward, upper, lower);
+        float depth = DepthOffset + Axis(keyboard.aKey.isPressed, keyboard.dKey.isPressed) * testMoveSpeed * delta;
+        SetTrackingOffsets(forward, upper, lower, depth);
     }
 
     private void LateUpdate()
@@ -164,12 +171,16 @@ public class PlayerController : MonoBehaviour
 
     internal void ApplyUdpTracking(float forward, float head, bool punched)
     {
-        if (gameplayEnabled)
-        {
-            udpForwardTarget = forward * 2f - 1f;
-            udpHeadTarget = Mathf.Max(head * 1.5f, MinimumNormalizedHeight());
-            hasUdpTarget = true;
-        }
+        ApplyUdpTracking(forward, head, 0f, punched);
+    }
+
+    internal void ApplyUdpTracking(float forward, float head, float depth, bool punched)
+    {
+        if (!gameplayEnabled) return;
+        udpForwardTarget = forward * 2f - 1f;
+        udpHeadTarget = Mathf.Max(head * 1.5f, MinimumNormalizedHeight());
+        udpDepthTarget = Mathf.Clamp(depth, -1f, 1f);
+        hasUdpTarget = true;
         SetAttackInput(0f);
         if (!punched) return;
         SetAttackInput(1f);
@@ -183,13 +194,19 @@ public class PlayerController : MonoBehaviour
         float headBlend = udpHeightSmoothTime > 0f ? 1f - Mathf.Exp(-Mathf.Max(0f, delta) / udpHeightSmoothTime) : 1f;
         float forward = Mathf.Lerp(ForwardOffset, udpForwardTarget, forwardBlend);
         float head = Mathf.Lerp(UpperBodyOffset, udpHeadTarget, headBlend);
-        SetTrackingOffsets(forward, head, 0f);
+        float depth = Mathf.Lerp(DepthOffset, udpDepthTarget, forwardBlend);
+        SetTrackingOffsets(forward, head, 0f, depth);
     }
 
     public bool SetTrackingOffsets(float forwardOffset, float upperPosition, float lowerPosition)
     {
+        return SetTrackingOffsets(forwardOffset, upperPosition, lowerPosition, DepthOffset);
+    }
+
+    public bool SetTrackingOffsets(float forwardOffset, float upperPosition, float lowerPosition, float depthOffset)
+    {
         if (!gameplayEnabled) return false;
-        if (!IsFinite(forwardOffset) || !IsFinite(upperPosition) || !IsFinite(lowerPosition)) return false;
+        if (!IsFinite(forwardOffset) || !IsFinite(upperPosition) || !IsFinite(lowerPosition) || !IsFinite(depthOffset)) return false;
         if (!initialized) CaptureOrigin();
 
         forwardOffset = Mathf.Clamp(forwardOffset, -1f, 1f);
@@ -201,9 +218,10 @@ public class PlayerController : MonoBehaviour
         float centerMovement = originalBodyHeight * ((upperPosition + lowerPosition) * 0.5f - 0.5f);
 
         ForwardOffset = forwardOffset;
+        DepthOffset = Mathf.Clamp(depthOffset, -1f, 1f);
         UpperBodyOffset = upperPosition;
         LowerBodyOffset = lowerPosition;
-        transform.position = originPosition + forwardDirection * (forwardOffset * TrackingTravel) + Vector3.up * centerMovement;
+        transform.position = originPosition + forwardDirection * (forwardOffset * TrackingTravel) + TrackingRightDirection * (-DepthOffset * lateralMoveDistance) + Vector3.up * centerMovement;
 
         if (bodyCollider != null && originalBodyHeight > 0f)
         {
@@ -219,7 +237,7 @@ public class PlayerController : MonoBehaviour
     public void ResetTrackingOffsets()
     {
         hasUdpTarget = false;
-        SetTrackingOffsets(0f, 1f, 0f);
+        SetTrackingOffsets(0f, 1f, 0f, 0f);
     }
 
     public void SetGameplayEnabled(bool enabled)
@@ -240,16 +258,11 @@ public class PlayerController : MonoBehaviour
 
     public bool SetAttackInput(float value)
     {
-        if (!isActiveAndEnabled || !IsFinite(value)) return false;
+        if (!gameplayEnabled || !isActiveAndEnabled || !IsFinite(value)) return false;
         if (value != 0f && value != 1f) return false;
         bool pressed = value == 1f && AttackInput == 0f;
         AttackInput = value;
-        if (pressed)
-        {
-            if (!gameplayEnabled || IsDead || OpponentHealth <= 0f) MenuPunchPressed?.Invoke();
-            else Punch();
-            AttackInput = value;
-        }
+        if (pressed) Punch();
         return true;
     }
 
@@ -306,11 +319,6 @@ public class PlayerController : MonoBehaviour
             return;
         }
         BattleAudio.Play(FightSound.PlayerPunch);
-        if (IsTooFar)
-        {
-            ReportPunch(PunchResult.Miss);
-            return;
-        }
         if (!RushAttempted && OpponentHealth <= PunchDamage)
         {
             BeginRush();
@@ -376,13 +384,25 @@ public class PlayerController : MonoBehaviour
     {
         if (!initialized) CaptureOrigin();
         Vector3 center = originPosition + transform.TransformVector(bodyCenterLocal);
-        return center + forwardDirection * (ForwardOffset * TrackingTravel) + Vector3.up * (originalBodyHeight * (normalizedHeight - 0.5f));
+        return center + forwardDirection * (ForwardOffset * TrackingTravel) + TrackingRightDirection * (-DepthOffset * lateralMoveDistance) + Vector3.up * (originalBodyHeight * (normalizedHeight - 0.5f));
     }
 
     public Vector3 GetRearmostStandingPosition(float normalizedHeight)
     {
         Vector3 current = GetStandingPosition(normalizedHeight);
         return current - forwardDirection * (ForwardOffset * TrackingTravel + forwardDistance);
+    }
+
+    public bool WouldReceiveAttack(Vector3 start, Vector3 end, float radius)
+    {
+        return IntersectsBody(start, end, radius, out _);
+    }
+
+    public void ReportDodge()
+    {
+        if (!gameplayEnabled || IsDead || IsFinisherRush) return;
+        BattleAudio.Play(FightSound.Dodge);
+        Dodged?.Invoke();
     }
 
     public bool TryReceiveAttack(Vector3 start, Vector3 end, float radius)

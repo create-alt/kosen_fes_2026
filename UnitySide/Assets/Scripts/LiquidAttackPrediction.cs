@@ -51,7 +51,8 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
     private void Show(DilatantLiquidAttack attack)
     {
         if (predictionLineTemplate == null || targetCamera == null || !attack.IsPredicting) return;
-        if (!AttackPredictionScreen.FacesSource(targetCamera, attack.IncomingDirection)) return;
+        bool depthLane = targetCamera.targetDisplay == 0 && attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.FrontShot;
+        if (!depthLane && !AttackPredictionScreen.FacesSource(targetCamera, attack.IncomingDirection)) return;
         foreach (Warning existing in warnings)
         {
             if (existing.Attack == attack) return;
@@ -78,7 +79,8 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
         Vector3 viewport = targetCamera.WorldToViewportPoint(reference);
         Rect cameraRect = targetCamera.rect;
         bool sideView = Mathf.Abs(Vector3.Dot(cameraTransform.right, warning.Attack.PlayerForwardDirection)) > 0.5f;
-        bool vertical = sideView && warning.Attack.CurrentPattern != DilatantLiquidAttack.AttackPattern.HighJet;
+        bool depthLane = warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.FrontShot && targetCamera.targetDisplay == 0;
+        bool vertical = depthLane || (sideView && warning.Attack.CurrentPattern != DilatantLiquidAttack.AttackPattern.UpperWave);
         float x = cameraRect.x + Mathf.Clamp(viewport.x, 0.05f, 0.95f) * cameraRect.width;
         float y = cameraRect.y + Mathf.Clamp(viewport.y, 0.05f, 0.95f) * cameraRect.height;
         RectTransform line = warning.Line.rectTransform;
@@ -86,7 +88,7 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
         line.anchorMax = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.95f) : new Vector2(cameraRect.x + cameraRect.width * 0.95f, y);
         line.pivot = new Vector2(0.5f, 0.5f);
         line.anchoredPosition = Vector2.zero;
-        line.sizeDelta = vertical ? new Vector2(lineWidth, 0f) : new Vector2(0f, lineWidth);
+        line.sizeDelta = vertical ? new Vector2(Mathf.Max(18f, lineWidth), 0f) : new Vector2(0f, Mathf.Max(18f, lineWidth));
         line.localRotation = Quaternion.identity;
         line.localScale = Vector3.one;
         Color color = warning.Attack.PredictionColor;

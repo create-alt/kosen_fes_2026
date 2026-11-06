@@ -58,7 +58,6 @@ public sealed class FightGameUI : MonoBehaviour
     private CombatFeedback feedback;
     private bool resultAnnounced;
     private float resultElapsed;
-    private double nextMenuPunchTime;
     private int selectedEnemy;
     private int selectedDifficulty = 1;
     private static readonly Color Accent = new Color(0.16f, 0.88f, 0.78f);
@@ -109,9 +108,6 @@ public sealed class FightGameUI : MonoBehaviour
             int choice = index;
             view.difficultyButtons[index].onClick.AddListener(() => ChooseDifficulty(choice));
         }
-        player.MenuPunchPressed += HandleMenuPunch;
-        view.start.GetComponentInChildren<Text>().text = "パンチで対戦をはじめる";
-        view.resultMenu.GetComponentInChildren<Text>().text = "パンチで敵選択へ";
         view.start.onClick.AddListener(StartBattle);
         view.retry.onClick.AddListener(Retry);
         view.resultMenu.onClick.AddListener(ReturnToMenu);
@@ -121,22 +117,6 @@ public sealed class FightGameUI : MonoBehaviour
         ChooseEnemy(0);
         RefreshSettings();
         view.result.SetActive(false);
-    }
-
-    private void HandleMenuPunch()
-    {
-        if (Time.unscaledTimeAsDouble < nextMenuPunchTime) return;
-        Button action = null;
-        if (view.result.activeInHierarchy) action = view.resultMenu;
-        else if (selection.IsSelecting && view.setup.activeInHierarchy) action = view.start;
-        if (action == null || !action.isActiveAndEnabled || !action.interactable) return;
-        nextMenuPunchTime = Time.unscaledTimeAsDouble + 0.5d;
-        action.onClick.Invoke();
-    }
-
-    private void OnDestroy()
-    {
-        if (player != null) player.MenuPunchPressed -= HandleMenuPunch;
     }
 
     public void ChooseEnemy(int index)
@@ -162,7 +142,7 @@ public sealed class FightGameUI : MonoBehaviour
         for (int index = 0; index < view.difficultyFaces.Length; index++) view.difficultyFaces[index].color = index == selectedDifficulty ? new Color(0.08f, 0.36f, 0.34f) : new Color(0.12f, 0.18f, 0.27f);
         view.difficultyHelp.text = selectedDifficulty == 0 ? "予告は長め。連射は1発ずつ。" : selectedDifficulty == 2 ? "速めのテンポ。連射が増えます。" : "敵HPに合わせて3段階で変化します。";
         view.volumeValue.text = Mathf.RoundToInt(view.volume.value * 100f) + "%";
-        view.inputHelp.text = view.keyboard.isOn ? "Space：パンチ   W / S：前後移動\n↑ / ↓：高さ   J：しゃがむ   Home：姿勢リセット" : "画像認識からの動きで操作します。\nキーボードのテスト操作はOFFです。";
+        view.inputHelp.text = view.keyboard.isOn ? "Space：パンチ   W / S：前後   A / D：左右\n↑ / ↓：高さ   J：しゃがむ   Home：姿勢リセット" : "画像認識からの動きで操作します。\nキーボードのテスト操作はOFFです。";
     }
 
     private void SaveSettings()

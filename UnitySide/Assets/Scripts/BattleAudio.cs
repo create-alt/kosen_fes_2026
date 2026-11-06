@@ -5,7 +5,7 @@ using UnityEngine;
 public enum FightSound
 {
     Gong, PlayerPunch, EnemyPunch, EnemyHit, PlayerHit, Missile, Liquid, Block,
-    RushStart, RushHit, RushTick, RushSuccess, Victory, Defeat
+    RushStart, RushHit, RushTick, RushSuccess, Victory, Defeat, Dodge
 }
 
 [DefaultExecutionOrder(-100)]
@@ -55,8 +55,15 @@ public sealed class BattleAudio : MonoBehaviour
     private void BuildLibrary()
     {
         library.Clear();
-        if (clips == null) return;
-        foreach (SoundClip sound in clips) if (sound != null && sound.clip != null) library[sound.sound] = sound.clip;
+        if (clips != null)
+        {
+            foreach (SoundClip sound in clips) if (sound != null && sound.clip != null) library[sound.sound] = sound.clip;
+        }
+        if (!library.ContainsKey(FightSound.Dodge))
+        {
+            AudioClip dodge = Resources.Load<AudioClip>("FightAudio/Dodge");
+            if (dodge != null) library[FightSound.Dodge] = dodge;
+        }
     }
 
     public static void Play(FightSound sound, float side = 0f)
