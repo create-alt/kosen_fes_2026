@@ -68,6 +68,7 @@ public class PlayerController : MonoBehaviour
     public float AttackInput { get; private set; }
     public Vector3 TrackingForwardDirection => forwardDirection;
     public event Action<PunchResult, Vector3> PunchResolved;
+    public event Action MenuPunchPressed;
     public event Action Damaged;
     public event Action HealthChanged;
     public float CurrentHealth { get; private set; } = 100f;
@@ -127,11 +128,10 @@ public class PlayerController : MonoBehaviour
             udpTracking = null;
         }
         hasUdpTarget = false;
-        if (keyboard == null || !gameplayEnabled) return;
-        if (!enableKeyboardTest) return;
-
+        if (keyboard == null || !enableKeyboardTest) return;
         if (keyboard.spaceKey.wasPressedThisFrame) SetAttackInput(1f);
         if (keyboard.spaceKey.wasReleasedThisFrame) SetAttackInput(0f);
+        if (!gameplayEnabled) return;
 
         if (keyboard.homeKey.wasPressedThisFrame)
         {
@@ -164,10 +164,12 @@ public class PlayerController : MonoBehaviour
 
     internal void ApplyUdpTracking(float forward, float head, bool punched)
     {
-        if (!gameplayEnabled) return;
-        udpForwardTarget = forward * 2f - 1f;
-        udpHeadTarget = Mathf.Max(head * 1.5f, MinimumNormalizedHeight());
-        hasUdpTarget = true;
+        if (gameplayEnabled)
+        {
+            udpForwardTarget = forward * 2f - 1f;
+            udpHeadTarget = Mathf.Max(head * 1.5f, MinimumNormalizedHeight());
+            hasUdpTarget = true;
+        }
         SetAttackInput(0f);
         if (!punched) return;
         SetAttackInput(1f);
@@ -238,11 +240,16 @@ public class PlayerController : MonoBehaviour
 
     public bool SetAttackInput(float value)
     {
-        if (!gameplayEnabled || !isActiveAndEnabled || !IsFinite(value)) return false;
+        if (!isActiveAndEnabled || !IsFinite(value)) return false;
         if (value != 0f && value != 1f) return false;
         bool pressed = value == 1f && AttackInput == 0f;
         AttackInput = value;
-        if (pressed) Punch();
+        if (pressed)
+        {
+            if (!gameplayEnabled || IsDead || OpponentHealth <= 0f) MenuPunchPressed?.Invoke();
+            else Punch();
+            AttackInput = value;
+        }
         return true;
     }
 
