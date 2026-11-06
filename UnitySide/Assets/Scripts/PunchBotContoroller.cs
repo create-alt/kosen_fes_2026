@@ -209,7 +209,7 @@ public class PunchBotContoroller : MonoBehaviour
 
     private void InterruptWindup()
     {
-        if (punching) return;
+        if (punching || queuedMissiles > 0) return;
         queuedMissiles = 0;
         if (punchWindingUp) CancelCurrentAttack();
     }
