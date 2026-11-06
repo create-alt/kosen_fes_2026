@@ -74,6 +74,7 @@ public sealed class FightGameUI : MonoBehaviour
     private void Awake()
     {
         if (player == null || selection == null || view == null) return;
+        BoxingArenaBackdrop.Install(player);
         GameObject overlay = new GameObject("CombatFeedback", typeof(RectTransform), typeof(CanvasRenderer), typeof(CombatFeedback));
         overlay.transform.SetParent(transform, false);
         RectTransform overlayRect = (RectTransform)overlay.transform;
