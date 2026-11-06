@@ -26,6 +26,7 @@ public class StraightMissile : MonoBehaviour
     private Transform attackOwner;
     private int battleVersion;
     private bool threatenedAtLock;
+    private bool dodgeReported;
 
     public static event Action<StraightMissile, Vector3> PredictionStarted;
     public static event Action<StraightMissile> PredictionEnded;
@@ -43,6 +44,7 @@ public class StraightMissile : MonoBehaviour
         battleVersion = targetPlayer != null ? targetPlayer.BattleVersion : 0;
         flyingIncoming = false;
         threatenedAtLock = false;
+        dodgeReported = false;
         BeginFlight(moveDirection, maxDistance, rotation);
         initialized = true;
     }
@@ -72,7 +74,6 @@ public class StraightMissile : MonoBehaviour
             waitRemaining -= Time.deltaTime;
             if (waitRemaining <= 0f)
             {
-                if (flyingIncoming) BattleAudio.Play(FightSound.Missile, targetPlayer != null ? Vector3.Dot(targetPlayer.transform.right, IncomingDirection.normalized) : 0f);
                 EndPrediction();
             }
             return;
@@ -95,11 +96,16 @@ public class StraightMissile : MonoBehaviour
             return;
         }
 
+        if (flyingIncoming && threatenedAtLock && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, hitRadius))
+        {
+            dodgeReported = true;
+            targetPlayer.ReportDodge();
+        }
+
         if (traveled < travelDistance) return;
 
         if (flyingIncoming || target == null)
         {
-            if (flyingIncoming && threatenedAtLock && targetPlayer != null) targetPlayer.ReportDodge();
             initialized = false;
             Destroy(gameObject);
             return;

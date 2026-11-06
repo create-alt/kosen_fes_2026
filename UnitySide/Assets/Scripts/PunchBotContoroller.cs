@@ -32,6 +32,7 @@ public class PunchBotContoroller : MonoBehaviour
     private bool punchWindingUp;
     private bool closePressure;
     private bool punchThreatened;
+    private float punchRetreatLimit;
     private float punchWindupRemaining;
     private int queuedMissiles;
     private double nextMissileTime;
@@ -71,6 +72,7 @@ public class PunchBotContoroller : MonoBehaviour
 
     private void OnDisable()
     {
+        if (motion != null) motion.PrioritizePunch = false;
         queuedMissiles = 0;
         punchWindingUp = false;
         EndPunchPrediction();
@@ -117,7 +119,7 @@ public class PunchBotContoroller : MonoBehaviour
 
         bool closeRange = trackedPlayer.IsInEnemyPunchRange;
         motion.SetBoxingGuard(closeRange);
-        if (closeRange != previousCloseRange)
+        if (closeRange != previousCloseRange && !punching)
         {
             previousCloseRange = closeRange;
             punchesRemaining = 0;
@@ -179,6 +181,8 @@ public class PunchBotContoroller : MonoBehaviour
         }
 
         punchPosition = trackedPlayer.GetStandingPosition(punchHeight);
+        punchRetreatLimit = trackedPlayer.ForwardOffset - 0.12f;
+        motion.PrioritizePunch = true;
         punchThreatened = trackedPlayer.WouldReceiveAttack(punchPosition, punchPosition, punchHitRadius);
         punching = true;
         attacking = true;
@@ -194,7 +198,7 @@ public class PunchBotContoroller : MonoBehaviour
         punchWindupRemaining -= delta;
         if (punchWindupRemaining > 0f) return;
         punchWindingUp = false;
-        if (!CanAttack() || !trackedPlayer.IsInEnemyPunchRange || !motion.PlayPunchAttack(nextPunchIsJab))
+        if (!CanAttack() || !motion.PlayPunchAttack(nextPunchIsJab))
         {
             CancelCurrentAttack();
             return;
@@ -205,12 +209,14 @@ public class PunchBotContoroller : MonoBehaviour
 
     private void InterruptWindup()
     {
+        if (punching) return;
         queuedMissiles = 0;
         if (punchWindingUp) CancelCurrentAttack();
     }
 
     private void CancelCurrentAttack()
     {
+        if (motion != null) motion.PrioritizePunch = false;
         punchWindingUp = false;
         EndPunchPrediction();
         if (motion != null && motion.IsAttacking) motion.StopMissileAttack();
@@ -224,7 +230,7 @@ public class PunchBotContoroller : MonoBehaviour
     {
         EndPunchPrediction();
         if (!attacking || !punching || !CanAttack()) return;
-        bool hit = trackedPlayer.IsInEnemyPunchRange && trackedPlayer.TryReceiveAttack(punchPosition, punchPosition, punchHitRadius);
+        bool hit = trackedPlayer.ForwardOffset >= punchRetreatLimit && trackedPlayer.TryReceiveAttack(punchPosition, punchPosition, punchHitRadius);
         if (!hit && punchThreatened) trackedPlayer.ReportDodge();
         punchThreatened = false;
     }
@@ -254,6 +260,7 @@ public class PunchBotContoroller : MonoBehaviour
 
     private void EndAttack()
     {
+        if (motion != null) motion.PrioritizePunch = false;
         punchWindingUp = false;
         EndPunchPrediction();
         bool wasPunching = punching;

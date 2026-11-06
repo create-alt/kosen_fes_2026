@@ -16,6 +16,7 @@ public sealed class DilatantEnemy : MonoBehaviour
     private bool attackInputHeld;
     private int rapidPunchCount;
 
+    public bool PrioritizePunch { get; set; }
     public float CurrentHealth => damageModel == null ? maxHealth : damageModel.Health;
     public float MaxHealth => maxHealth;
     public bool IsDead => damageModel != null && damageModel.IsDead;
@@ -37,6 +38,8 @@ public sealed class DilatantEnemy : MonoBehaviour
         rapidPunchCount = Mathf.Min(4, rapidPunchCount + 1);
         lastPunchTime = now;
         DilatantReaction reaction = damageModel.Apply(damage, rapidPunchCount > 3 ? 2f : 0f);
+
+        if (PrioritizePunch && reaction != DilatantReaction.Death) return;
 
         switch (reaction)
         {
@@ -112,6 +115,7 @@ public sealed class DilatantEnemy : MonoBehaviour
 
     private void ResetCombo()
     {
+        PrioritizePunch = false;
         rapidPunchCount = 0;
         lastPunchTime = double.NegativeInfinity;
         attackInputHeld = false;

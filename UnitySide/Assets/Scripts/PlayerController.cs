@@ -398,6 +398,16 @@ public class PlayerController : MonoBehaviour
         return IntersectsBody(start, end, radius, out _);
     }
 
+    public bool HasAttackPassed(Vector3 position, Vector3 direction, float radius)
+    {
+        if (bodyCollider == null || !bodyCollider.enabled || !gameplayEnabled) return false;
+        Transform body = bodyCollider.transform;
+        Vector3 half = bodyCollider.size * 0.5f;
+        Vector3 axis = direction.normalized;
+        float extent = Mathf.Abs(Vector3.Dot(axis, body.TransformVector(Vector3.right * half.x))) + Mathf.Abs(Vector3.Dot(axis, body.TransformVector(Vector3.up * half.y))) + Mathf.Abs(Vector3.Dot(axis, body.TransformVector(Vector3.forward * half.z)));
+        return Vector3.Dot(position - body.TransformPoint(bodyCollider.center), axis) > extent + Mathf.Max(0f, radius);
+    }
+
     public void ReportDodge()
     {
         if (!gameplayEnabled || IsDead || IsFinisherRush) return;

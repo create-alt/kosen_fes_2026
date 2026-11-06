@@ -32,11 +32,11 @@ public sealed class CombatFeedback : MaskableGraphic
             if (camera.targetDisplay == 0) frontCamera = camera;
         }
         raycastTarget = false;
-        hitLabel = MakeLabel("PunchResult", font, 68);
+        hitLabel = MakeLabel("PunchResult", font, 86);
         finishLabel = MakeLabel("Knockout", font, 134);
         finishLabel.rectTransform.sizeDelta = new Vector2(1600f, 360f);
         finishDetail = MakeLabel("ClearMessage", font, 38);
-        dodgeLabel = MakeLabel("DodgeSuccess", font, 64);
+        dodgeLabel = MakeLabel("DodgeSuccess", font, 82);
         dodgeLabel.text = "DODGE!";
         player.Dodged += ShowDodge;
         player.PunchResolved += ShowPunch;
@@ -126,7 +126,7 @@ public sealed class CombatFeedback : MaskableGraphic
         hitLabel.enabled = hitAge < 0.55f && !IsCelebrating;
         if (hitLabel.enabled)
         {
-            hitLabel.rectTransform.anchoredPosition = impact + Vector2.up * (140f + hitAge * 90f);
+            hitLabel.rectTransform.anchoredPosition = impact + Vector2.up * (180f + hitAge * 100f);
             hitLabel.rectTransform.localScale = Vector3.one * (1f + 0.3f * Mathf.Exp(-hitAge * 18f));
             Color tint = hitLabel.color;
             tint.a = 1f - Mathf.Clamp01((hitAge - 0.25f) / 0.3f);
@@ -150,18 +150,18 @@ public sealed class CombatFeedback : MaskableGraphic
         {
             Color tint = lastResult == PunchResult.Hit ? Gold : new Color(0.4f, 0.85f, 1f);
             tint.a = 1f - hitAge / 0.4f;
-            float radius = 48f + hitAge * 340f;
-            Ring(mesh, impact, radius, 12f, tint);
+            float radius = 64f + hitAge * 420f;
+            Ring(mesh, impact, radius, 16f, tint);
             for (int index = 0; index < 12; index++)
             {
                 float angle = index * Mathf.PI / 6f;
                 Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                Line(mesh, impact + direction * (radius + 14f), impact + direction * (radius + 58f), 9f, tint);
+                Line(mesh, impact + direction * (radius + 14f), impact + direction * (radius + 76f), 12f, tint);
             }
         }
         if (dodgeAge < 0.5f && !IsCelebrating)
         {
-            Ring(mesh, new Vector2(0f, -rectTransform.rect.height * 0.2f), 120f + dodgeAge * 180f, 10f, new Color(0.2f, 1f, 0.85f, (1f - dodgeAge / 0.5f) * 0.6f));
+            Ring(mesh, new Vector2(0f, -rectTransform.rect.height * 0.2f), 160f + dodgeAge * 240f, 14f, new Color(0.2f, 1f, 0.85f, (1f - dodgeAge / 0.5f) * 0.6f));
         }
         if (!IsCelebrating) return;
         Rect bounds = rectTransform.rect;
