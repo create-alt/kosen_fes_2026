@@ -79,6 +79,19 @@ public sealed class CombatFeedback : MaskableGraphic
     {
         if (IsCelebrating) return;
         dodgeAge = 0f;
+        UpdateDodgeDisplay();
+        SetVerticesDirty();
+    }
+
+    private void UpdateDodgeDisplay()
+    {
+        dodgeLabel.enabled = dodgeAge < 0.7f && !IsCelebrating;
+        if (dodgeLabel.enabled)
+        {
+            dodgeLabel.rectTransform.anchoredPosition = new Vector2(0f, -rectTransform.rect.height * 0.2f + dodgeAge * 35f);
+            dodgeLabel.rectTransform.localScale = Vector3.one * (1f + 0.15f * Mathf.Exp(-dodgeAge * 12f));
+            dodgeLabel.color = new Color(0.2f, 1f, 0.85f, 1f - Mathf.Clamp01((dodgeAge - 0.35f) / 0.35f));
+        }
     }
 
     public void PlayVictory()
@@ -114,13 +127,7 @@ public sealed class CombatFeedback : MaskableGraphic
             return;
         }
         dodgeAge += Time.unscaledDeltaTime;
-        dodgeLabel.enabled = dodgeAge < 0.7f && !IsCelebrating;
-        if (dodgeLabel.enabled)
-        {
-            dodgeLabel.rectTransform.anchoredPosition = new Vector2(0f, -rectTransform.rect.height * 0.2f + dodgeAge * 35f);
-            dodgeLabel.rectTransform.localScale = Vector3.one * (1f + 0.15f * Mathf.Exp(-dodgeAge * 12f));
-            dodgeLabel.color = new Color(0.2f, 1f, 0.85f, 1f - Mathf.Clamp01((dodgeAge - 0.35f) / 0.35f));
-        }
+        UpdateDodgeDisplay();
         hitAge += Time.unscaledDeltaTime;
         victoryAge += Time.unscaledDeltaTime;
         hitLabel.enabled = hitAge < 0.55f && !IsCelebrating;
