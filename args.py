@@ -36,8 +36,9 @@ def add_pipeline_args(parser):
     g.add_argument("--hand-radius", type=float, default=None,
                    help="Radius (pixels) of the circle around each wrist; a hit = the bag's region "
                         "overlaps it. Default: bag width x --hand-radius-ratio")
-    g.add_argument("--hand-radius-ratio", type=float, default=0.5,
-                   help="Radius as a ratio of the bag width, used without --hand-radius (default: 0.5)")
+    g.add_argument("--hand-radius-ratio", type=float, default=0.6,
+                   help="Radius as a ratio of the bag width, used without --hand-radius (default: 0.6; "
+                        "0.5 is stricter but misses quick punches when the frame rate is low)")
     g.add_argument("--threshold", type=float, default=None,
                    help="Not given (default): a punch = a new hand contact only. With a number: a contact AND "
                         "a bag tilt change of at least this many degrees from rest (with --no-contact-gate / "
@@ -82,6 +83,12 @@ def add_pipeline_args(parser):
                    help="Also send every frame to Unity via UDP as JSON {forward, head, feet, punch}, e.g. 127.0.0.1:5005")
     g.add_argument("--udp-full", action="store_true",
                    help="Send all fields (hands, punch, punches, bag, motion...) over UDP instead of only forward/head/feet/punch")
+
+    g = parser.add_argument_group("画面のエフェクト (Python の画面だけ。Unity には影響しない)")
+    g.add_argument("--no-effects", action="store_true",
+                   help="Start without the fun screen effects (toggle with the E key in the window)")
+    g.add_argument("--hide-overlay", action="store_true",
+                   help="Start with the detection overlay (bag outline, skeleton, numbers) hidden (toggle with D)")
     # 以前の版との互換(色追跡は廃止した)
     parser.add_argument("--tracker", choices=["yolo", "color"], default="yolo", help=argparse.SUPPRESS)
     return parser

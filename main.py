@@ -18,7 +18,8 @@ import cv2
 
 from args import add_pipeline_args, check_args
 from logic import HoldKey
-from output import Reporter, draw_overlay
+from effects import ScreenView
+from output import Reporter
 from pipeline import Pipeline
 
 WINDOW = "Punching Bag Detector (press Q to quit)"
@@ -35,6 +36,9 @@ def parse_args():
     parser.add_argument("--no-display", action="store_true", help="Do not show the video window")
     parser.add_argument("--save-video", nargs="?", const="", default=None, metavar="PATH",
                         help="Also save the video with the overlay. No value = <input name>_result.mp4")
+    parser.add_argument("--realtime", action="store_true",
+                        help="Play the window at the video's real speed, skipping frames when processing is slower. "
+                             "Without a fast GPU, short punches on skipped frames are MISSED (default: every frame)")
     args = parser.parse_args()
     return check_args(parser, args)
 
@@ -63,10 +67,27 @@ def main():
     busy, frames, index, finished = 0.0, 0, 0, False
     hold = HoldKey(args.calib_key, args.hold_timeout) if not args.no_display else None
     was_held = False
+    view = ScreenView(args) if not (args.no_display and args.save_video is None) else None
     if hold:
         print(f"Hold '{args.calib_key.upper()}' in the video window to measure the reference (bag tilt / head / body) again.")
+    # --realtime: 動画と同じ速さで再生する(処理が追いつかないフレームは飛ばすので、短い接触=パンチを見落とすことがある)。
+    # 既定は全フレームを処理する(遅い PC ではスロー再生になるが、パンチは見落とさない)。保存するときは常に全フレーム
+    sync = args.realtime and not args.no_display and args.save_video is None and fps > 0
+    if args.realtime and args.save_video is not None:
+        print("--realtime is ignored while saving a video (every frame is processed).")
+    if sync:
+        print("Playing at the video's real speed: frames are skipped when processing is slower, "
+              "so quick punches can be missed on a slow PC.")
+    clock = None  # 再生開始の時刻(動画の 0 秒にあたる時刻)
     try:
         while True:
+            if sync:
+                if clock is None:
+                    clock = time.monotonic()
+                behind = int((time.monotonic() - clock) * fps) - index
+                while behind > 0 and cap.grab():  # 遅れているぶんのフレームは読み飛ばす(処理しない)
+                    index += 1
+                    behind -= 1
             ok, frame = cap.read()
             if not ok:
                 finished = True
@@ -86,8 +107,8 @@ def main():
 
             if args.no_display and not args.save_video:
                 continue
-            draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
-                         hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate" if hold else "")
+            frame = view.draw(frame, pipeline, result,
+                              hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate" if hold else "")
             if args.save_video is not None:
                 if writer is None:
                     writer, path = open_writer(args, fps, frame)
@@ -95,8 +116,12 @@ def main():
             if not args.no_display:
                 last = frame.copy()
                 cv2.imshow(WINDOW, frame)
-                key = cv2.waitKey(1)
+                wait = 1
+                if sync:  # 処理が動画より速いときは、次のフレームの時刻まで待つ
+                    wait = max(1, int((clock + index / fps - time.monotonic()) * 1000))
+                key = cv2.waitKey(wait)
                 hold.feed(key, time.monotonic())
+                view.key(key)
                 if key & 0xFF == ord("q"):
                     break
 

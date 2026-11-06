@@ -20,7 +20,8 @@ import cv2
 
 from args import add_pipeline_args, check_args
 from logic import HoldKey
-from output import Reporter, draw_overlay
+from effects import ScreenView
+from output import Reporter
 from pipeline import Pipeline
 
 WINDOW = "Punching Bag (realtime) - press Q to quit"
@@ -105,6 +106,7 @@ def main():
         pipeline = Pipeline(args, None if display else args.motion_calib_frames)
         reporter = Reporter(args.fmt, args.quiet, args.print_every, args.udp, args.udp_full)
         hold = HoldKey(args.calib_key, args.hold_timeout) if display else None
+        view = ScreenView(args) if display else None
         was_held = False
         print("Running. Keep the bag still for the first moments (calibration).")
         if hold:
@@ -131,10 +133,10 @@ def main():
             reporter.emit(result)
 
             if display:
-                draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
-                             hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
+                frame = view.draw(frame, pipeline, result, hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
                 cv2.imshow(WINDOW, frame)
                 key = cv2.waitKey(1)
+                view.key(key)
                 if hold:
                     hold.feed(key, stamp)
                 if key & 0xFF == ord("q"):
