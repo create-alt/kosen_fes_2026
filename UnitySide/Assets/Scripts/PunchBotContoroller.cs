@@ -254,7 +254,7 @@ public class PunchBotContoroller : MonoBehaviour
             movement = missile.AddComponent<StraightMissile>();
         }
 
-        movement.Initialize(missileSpeed, riseDistance, Vector3.up, rotation, player);
+        movement.Initialize(missileSpeed, riseDistance, Vector3.up, rotation, player, directIncoming: true);
         movement.ConfigureDifficulty(activeDifficulty, transform);
     }
 
