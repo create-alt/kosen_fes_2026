@@ -43,6 +43,7 @@ python validation.py --data pose_dataset --weights yolo11n-pose.pt pose_model.pt
 
 # 3. 実行
 python realtime.py                       # カメラ(C キーを押している間、いつでも基準を測る)
+python realtime.py bag.mp4               # カメラの代わりに動画で、本番と同じ動き(等速で流し、処理が追いつかないフレームは飛ばす)を確認
 python main.py bag.mp4 --save-video      # 録画動画で確認
 ```
 

@@ -39,8 +39,8 @@ BODY_LINES = [
 ]
 ELBOW = {"L": L_ELBOW, "R": R_ELBOW}
 
-COOL = (255, 225, 155)  # BGR: ice cyan。白寄りで映像になじませる
-WARM = (45, 145, 255)   # BGR: deep amber。赤みを抑えた映画的な暖色
+COOL = (255, 205, 90)  # BGR: ice cyan。白寄りで映像になじませる
+WARM = (20, 95, 255)   # BGR: deep amber。赤みを抑えた映画的な暖色
 WHITE = (250, 250, 250)
 SIDE = {"L": COOL, "R": WARM}
 
@@ -104,8 +104,9 @@ class Particle:
 class Effects:
     """毎フレーム render() を呼ぶと、そのフレームにエフェクトを重ねたものを返す(状態は中で持つ)。"""
 
-    MAX_PARTICLES = 80
+    MAX_PARTICLES = 110
     COMBO_GAP = 1.2  # この秒数以内に次のパンチが来たらコンボが続く
+    FX_STEP = 0.05  # 演出の時計が 1 フレームで進む最大の秒数(10fps 前後でも、0.2 秒の演出が約 4 フレーム見える)
 
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
@@ -131,6 +132,7 @@ class Effects:
         self.foot = 0
         self.dash_ready = self.duck_ready = True
         self.prev_hit = {"L": False, "R": False}
+        self.fx_clock = 0.0  # 演出の時計(1 フレームで最大 FX_STEP 秒しか進めない。fps が低くても演出が数フレーム見える)
         # リアルタイム優先。エフェクト単体の予算は約8ms、超えたら自動で品質を落とす。
         self.target_fx_ms = 8.0
         self.fx_ms_ema = 0.0
@@ -148,6 +150,8 @@ class Effects:
         t = result.time
         dt = 1 / 30 if self.last_t is None or t <= self.last_t else min(0.1, t - self.last_t)
         self.last_t = t
+        self.fx_clock += min(dt, self.FX_STEP)
+        ft, fdt = self.fx_clock, min(dt, self.FX_STEP)  # 演出(光・筋・火花)の時刻と経過時間
         h, w = frame.shape[:2]
         if self.size != (w, h):
             self._init_size(w, h)
@@ -177,24 +181,25 @@ class Effects:
 
             # 細線と少数粒子だけ。GaussianBlur、resize、float画像合成は無し。
             self._draw_trails(light, t)
-            self._draw_rings(light, t)
-            self._draw_flares(light, t)
-            self._draw_streaks(light, t)
-            self._step_particles(light, dt)
+            self._draw_rings(light, ft)
+            self._draw_flares(light, ft)
+            self._step_particles(light, fdt)
             if bag is not None and self.bag_glow > 0.03:
                 smooth = cv2.approxPolyDP(cv2.convexHull(bag.contour),
                                           0.015 * cv2.arcLength(bag.contour, True), True)
                 cv2.drawContours(light, [smooth], -1, scaled(WHITE, 0.32 * self.bag_glow),
                                  1, cv2.LINE_AA)
             cv2.add(frame, light, dst=frame)
+        if self.streaks:  # パンチの光の筋は、足し算ではなく色で直接描く(白いバッグ・白い壁の前でも見える)
+            self._draw_streaks(frame, ft)
 
         # 全画面フラッシュと周辺減光も省略。等速性を優先する。
         self.flash = 0.0
         self.impact_pulse = 0.0
         self.bag_glow *= math.exp(-dt * 12)
-        self.rings = [x for x in self.rings if t - x["t0"] < x["life"]]
-        self.flares = [x for x in self.flares if t - x["t0"] < x["life"]]
-        self.streaks = [x for x in self.streaks if t - x["t0"] < x["life"]]
+        self.rings = [x for x in self.rings if ft - x["t0"] < x["life"]]
+        self.flares = [x for x in self.flares if ft - x["t0"] < x["life"]]
+        self.streaks = [x for x in self.streaks if ft - x["t0"] < x["life"]]
 
         self._draw_hud(frame, t, result)
         return frame
@@ -282,7 +287,7 @@ class Effects:
                                          "spin": self.rng.uniform(-40, 40), "life": 0.7, "color": (215, 220, 225),
                                          "opacity": 0.32, "additive": False})
                 else:
-                    self.rings.append({"t0": t, "x": foot[0], "y": foot[1], "r": T * 0.9, "life": 0.6, "aspect": 0.22,
+                    self.rings.append({"t0": self.fx_clock, "x": foot[0], "y": foot[1], "r": T * 0.9, "life": 0.6, "aspect": 0.22,
                                        "angle": 0.0, "color": scaled(self._accent(), 0.7), "thick": 1})
                 for _ in range(3):
                     self._add(Particle(foot[0] + self.rng.uniform(-0.3, 0.3) * T, foot[1], self.rng.uniform(-10, 10),
@@ -315,7 +320,7 @@ class Effects:
                 trail.popleft()
             hit = bool(result.hit_sides.get(side))
             if hit and not self.prev_hit[side] and p is not None:  # 触れた瞬間: 小さく光る
-                self.flares.append({"t0": t, "x": p[0], "y": p[1], "r": self.torso * 0.25, "life": 0.12,
+                self.flares.append({"t0": self.fx_clock, "x": p[0], "y": p[1], "r": self.torso * 0.25, "life": 0.12,
                                     "color": SIDE[side]})
             self.prev_hit[side] = hit
 
@@ -360,7 +365,7 @@ class Effects:
             color = SIDE[side]
             k = 0.7 + 0.3 * self.energy
 
-            self.flares.append({"t0": t, "x": x, "y": y, "r": T * (0.45 + 0.2 * self.energy), "life": 0.16,
+            self.flares.append({"t0": self.fx_clock, "x": x, "y": y, "r": T * (0.45 + 0.2 * self.energy), "life": 0.16,
                                 "color": WHITE})
             burst = [n for n in ("scorch_01", "scorch_02") if n in self.images]
             star = [n for n in ("star_07", "star_06") if n in self.images]
@@ -372,17 +377,29 @@ class Effects:
                 self.sprites.append({"t0": t, "name": star[0], "x": x, "y": y, "vy": 0.0,
                                      "size": (T * 1.7 * k, T * 0.9 * k), "angle": math.degrees(-ang) + 45 * self.rng.random(),
                                      "spin": 0.0, "life": 0.12, "color": WHITE, "opacity": 1.0, "additive": True})
-            if not burst:  # 素材が無いとき: 放射状に一瞬伸びる光の筋
-                n = 7
-                base = ang - math.pi * 0.55
-                self.streaks.append({"t0": t, "x": x, "y": y, "life": 0.13, "color": color,
-                                     "rays": [(base + 2 * math.pi * i / n + self.rng.uniform(-0.15, 0.15),
-                                               T * k * self.rng.uniform(0.5, 0.95)) for i in range(n)]})
-            for _ in range(int(3 + 3 * self.energy)):  # 細い火花(前方に多め)
-                a = ang + self.rng.gauss(0, 0.9)
-                s = self.rng.uniform(450, 1100) * u
-                self._add(Particle(x, y, math.cos(a) * s, math.sin(a) * s, self.rng.uniform(0.1, 0.26), "spark",
-                                   self.rng.choice([WHITE, color, color]), 1, drag=5.0, grav=250 * u))
+            # 放射状に一瞬伸びる光の筋(この版では素材の画像を描かないので、毎回これがパンチの演出の中心)
+            n = 10
+            base = self.rng.uniform(0, 2 * math.pi)
+            self.streaks.append({"t0": self.fx_clock, "x": x, "y": y, "life": 0.2, "color": color,
+                                 "rays": [(base + math.pi * 1.3 * i / max(1, n - 1) + self.rng.uniform(-0.10, 0.10),
+                                           T * k * self.rng.uniform(0.6, 1.05)) for i in range(n)]})
+            # 軽量な炎。画像、ぼかし、拡大縮小は使わず、小さな円と短線だけで描く。
+            for _ in range(int(5 + 4 * self.energy)):
+                a = ang + self.rng.gauss(0, 0.55)
+                speed = self.rng.uniform(180, 520) * u
+                self._add(Particle(x + self.rng.uniform(-0.08, 0.08) * T,
+                                   y + self.rng.uniform(-0.08, 0.08) * T,
+                                   math.cos(a) * speed,
+                                   math.sin(a) * speed - self.rng.uniform(20, 80) * u,
+                                   self.rng.uniform(0.18, 0.38), "flame",
+                                   self.rng.choice([WARM, WARM, (30, 180, 255)]),
+                                   self.rng.uniform(2.0, 4.2) * u, drag=4.2, grav=-90 * u))
+            for _ in range(3):
+                a = ang + self.rng.gauss(0, 0.75)
+                speed = self.rng.uniform(420, 850) * u
+                self._add(Particle(x, y, math.cos(a) * speed, math.sin(a) * speed,
+                                   self.rng.uniform(0.10, 0.20), "spark",
+                                   self.rng.choice([WHITE, color]), 1, drag=5.5, grav=220 * u))
             self.flash = max(self.flash, 0.035 + 0.035 * self.energy)
             self.impact_pulse = max(self.impact_pulse, 0.20 + 0.12 * self.energy)
             self.bag_glow = 1.0
@@ -500,6 +517,16 @@ class Effects:
                 c = scaled(mix(WHITE, p.color, f), 1 - f)
                 cv2.line(light, (int(p.x), int(p.y)), (int(p.x - p.vx * 0.035), int(p.y - p.vy * 0.035)), c, 1,
                          cv2.LINE_AA)
+            elif p.kind == "flame":
+                fade = (1 - f) ** 1.35
+                radius = max(1, int(p.size * (0.45 + 0.55 * fade)))
+                tail = (int(p.x - p.vx * 0.018), int(p.y - p.vy * 0.018))
+                cv2.line(light, tail, (int(p.x), int(p.y)), scaled((20, 90, 255), 0.55 * fade),
+                         max(1, radius), cv2.LINE_AA)
+                cv2.circle(light, (int(p.x), int(p.y)), radius, scaled(p.color, 0.82 * fade), -1, cv2.LINE_AA)
+                if radius >= 3:
+                    cv2.circle(light, (int(p.x), int(p.y)), max(1, radius // 3),
+                               scaled((180, 245, 255), fade), -1, cv2.LINE_AA)
             else:  # mote / ember
                 k = (1 - f) * (0.6 + 0.4 * math.sin(p.age * 20)) if p.kind == "ember" else (1 - f) * 0.8
                 cv2.circle(light, (int(p.x), int(p.y)), max(1, int(p.size)), scaled(p.color, k), -1, cv2.LINE_AA)
@@ -580,24 +607,29 @@ class Effects:
                 roi = out[ay0:ay1, ax0:ax1]
                 roi[:] = (roi * (1 - a) + color * a).astype(np.uint8)
 
-    def _draw_streaks(self, light, t):
-        """パンチの光の筋: 一瞬で外へ伸び、先端だけ残って消える(輪は残さない)。"""
+    def _draw_streaks(self, out, t):
+        """パンチの光の筋: 一瞬で外へ伸び、根元から消えていく(輪は残さない)。
+        足し算の光は白い背景で見えないので、画面に直接、色で描く(縁を少し濃い色にして、白い所でも輪郭が分かるように)。"""
         keep = []
         for st in self.streaks:
             f = (t - st["t0"]) / st["life"]
             if f >= 1 or f < 0:
                 continue
             keep.append(st)
-            grow = ease_out(min(1.0, f / 0.4))
-            k = (1 - f) ** 1.5
+            grow = ease_out(min(1.0, f / 0.35))
+            th = max(1, int(round(2.6 * self.unit * (1 - f) ** 0.7)))
+            edge = scaled(st["color"], 0.55)
+            core = mix(WHITE, st["color"], 0.25)
             for a, length in st["rays"]:
-                outer = length * (0.4 + 0.6 * grow)
-                inner = outer * (0.15 + 0.6 * f)  # 根元から消えていく
+                outer = length * (0.35 + 0.65 * grow)
+                inner = outer * (0.2 + 0.7 * f)  # 根元から消えていく
                 ca, sa = math.cos(a), math.sin(a)
                 p0 = (int(st["x"] + ca * inner), int(st["y"] + sa * inner))
                 p1 = (int(st["x"] + ca * outer), int(st["y"] + sa * outer))
-                cv2.line(light, p0, p1, scaled(st["color"], k), max(1, int(3 * self.unit * (1 - f))), cv2.LINE_AA)
-                cv2.line(light, p0, p1, scaled(WHITE, k), 1, cv2.LINE_AA)
+                cv2.line(out, p0, p1, edge, th + 1, cv2.LINE_AA)
+                cv2.line(out, p0, p1, st["color"], th, cv2.LINE_AA)
+                if th >= 3:
+                    cv2.line(out, p0, p1, core, max(1, th // 3), cv2.LINE_AA)
         self.streaks = keep
 
     def _impact_grade(self, frame, amount):
