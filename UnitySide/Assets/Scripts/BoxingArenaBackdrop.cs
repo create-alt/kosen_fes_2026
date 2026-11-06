@@ -50,7 +50,6 @@ public sealed class BoxingArenaBackdrop : MonoBehaviour
             Part(cube, wall, rotation * new Vector3(0f, 3.7f, 11f), new Vector3(22f, 9f, 0.3f), rotation);
             Part(cube, accent, rotation * new Vector3(0f, 3.65f, 10.78f), new Vector3(16f, 0.045f, 0.08f), rotation);
             Part(cube, seat, rotation * new Vector3(0f, 4.8f, 10.75f), new Vector3(8f, 1.4f, 0.12f), rotation);
-            Sign(rotation, "FIGHT NIGHT", new Vector3(0f, 4.8f, 10.64f));
             for (int row = 0; row < 4; row++)
             {
                 float z = 5.3f + row * 0.9f;
@@ -141,24 +140,6 @@ public sealed class BoxingArenaBackdrop : MonoBehaviour
             batches.Add(material, pieces);
         }
         pieces.Add(new CombineInstance { mesh = mesh, transform = Matrix4x4.TRS(position, rotation, scale) });
-    }
-
-    private void Sign(Quaternion rotation, string text, Vector3 position)
-    {
-        GameObject sign = new GameObject("ArenaBanner", typeof(TextMesh));
-        sign.transform.SetParent(transform, false);
-        sign.transform.localPosition = rotation * position;
-        sign.transform.localRotation = rotation;
-        TextMesh label = sign.GetComponent<TextMesh>();
-        label.text = text;
-        label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        label.fontSize = 64;
-        label.characterSize = 0.25f;
-        label.anchor = TextAnchor.MiddleCenter;
-        label.alignment = TextAlignment.Center;
-        label.fontStyle = FontStyle.Bold;
-        label.color = new Color(0.9f, 0.87f, 0.77f);
-        sign.GetComponent<MeshRenderer>().sharedMaterial = label.font.material;
     }
 
     private void OnDestroy()
