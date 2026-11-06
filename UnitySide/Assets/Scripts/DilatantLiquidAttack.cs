@@ -23,14 +23,17 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     [SerializeField, Min(0.1f)] private float liquidPunchReach = 0.9f;
     [SerializeField, Min(0f)] private float punchStepDistance = 0.35f;
     [SerializeField] private bool showPrediction = true;
+    [SerializeField] private bool externalControl;
 
     private enum Phase { Waiting, Charging, Flying, Splash }
     public enum AttackPattern { FrontShot, UpperWave, LiquidPunch }
 
     public static event System.Action<DilatantLiquidAttack> PredictionStarted;
     public static event System.Action<DilatantLiquidAttack> PredictionEnded;
+    public bool IsBusy => phase != Phase.Waiting;
     public bool IsPredicting => phase == Phase.Charging && showPrediction && isActiveAndEnabled;
     public Vector3 PredictionPosition { get; private set; }
+    public Vector3 PredictionBottom => new Vector3(PredictionPosition.x, player != null ? player.GetStandingPosition(0f).y : PredictionPosition.y, PredictionPosition.z);
     public AttackPattern CurrentPattern => pattern;
     public Vector3 IncomingDirection => launchPosition - PredictionPosition;
     public Vector3 PlayerForwardDirection => player != null ? player.TrackingForwardDirection : Vector3.forward;
@@ -52,13 +55,13 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private Material runtimeMaterial;
     private bool predictionAnnounced;
     private bool punchImpactApplied;
+    private bool lastAttackWasPunch;
     private float activeChargeDuration = 1.6f;
     private float activeFlightDuration = 1.3f;
     private float activeRecoveryDuration = 1.8f;
     private float waveLifetime;
     private float waveHalfWidth;
     private float frontShotLifetime;
-    private bool threatenedAtLock;
     private bool attackHit;
     private bool dodgeReported;
     private float punchRetreatLimit;
@@ -92,6 +95,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         battleVersion = player != null ? player.BattleVersion : 0;
         phase = Phase.Waiting;
         elapsed = 0f;
+        lastAttackWasPunch = false;
         waitDuration = firstAttackDelay;
     }
 
@@ -105,6 +109,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         if (battleVersion != player.BattleVersion)
         {
             battleVersion = player.BattleVersion;
+            lastAttackWasPunch = false;
             CancelAttack();
             waitDuration = Mathf.Max(2f, firstAttackDelay);
             return;
@@ -184,7 +189,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         switch (phase)
         {
             case Phase.Waiting:
-                if (elapsed >= waitDuration) BeginCharge();
+                if (!externalControl && elapsed >= waitDuration) BeginCharge();
                 break;
             case Phase.Charging:
                 DrawCharge(ChargeProgress);
@@ -200,7 +205,20 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
     }
 
-    private void BeginCharge()
+    public void ConfigureExternalControl(PlayerController targetPlayer)
+    {
+        player = targetPlayer;
+        externalControl = true;
+    }
+
+    public bool TryStartWave(float telegraph, float flightTime)
+    {
+        if (!externalControl || !isActiveAndEnabled || IsBusy || enemy == null || enemy.IsDead || player == null || !player.GameplayEnabled || player.IsDead || player.IsFinisherRush) return false;
+        BeginCharge(AttackPattern.UpperWave, telegraph, flightTime);
+        return true;
+    }
+
+    private void BeginCharge(AttackPattern? forcedPattern = null, float telegraph = 0f, float flightTime = 0f)
     {
         EnsureEffect();
         phase = Phase.Charging;
@@ -209,7 +227,13 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         activeChargeDuration = Mathf.Max(chargeDuration, difficulty.Telegraph);
         activeFlightDuration = Mathf.Max(flightDuration, difficulty.FlightTime);
         activeRecoveryDuration = Mathf.Max(recoveryDuration, difficulty.Recovery);
-        SelectPattern();
+        if (forcedPattern.HasValue)
+        {
+            pattern = forcedPattern.Value;
+            activeChargeDuration = Mathf.Max(0.9f, telegraph);
+            activeFlightDuration = Mathf.Max(0.8f, flightTime);
+        }
+        else SelectPattern();
         enemy.PrioritizePunch = pattern == AttackPattern.LiquidPunch;
         punchRetreatLimit = player.ForwardOffset - 0.12f;
         dodgeReported = false;
@@ -221,8 +245,6 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         else if (pattern == AttackPattern.LiquidPunch) activeChargeDuration = Mathf.Max(1.5f, activeChargeDuration);
         LockTrajectory();
         attackHit = false;
-        Vector3 threatShift = pattern == AttackPattern.UpperWave ? player.TrackingRightDirection * Vector3.Dot(player.GetStandingPosition(0.85f) - aimPosition, player.TrackingRightDirection) : Vector3.zero;
-        threatenedAtLock = player.WouldReceiveAttack(launchPosition + threatShift, aimPosition + threatShift, AttackRadius);
         SetColor(LiquidColor);
         effect.SetActive(true);
         if (showPrediction)
@@ -237,13 +259,16 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     {
         if (InPunchReach())
         {
-            pattern = player.IsTooClose || Random.value >= 0.5f ? AttackPattern.LiquidPunch : AttackPattern.FrontShot;
+            float punchChance = player.IsTooClose ? 0.6f : 0.45f;
+            if (!lastAttackWasPunch && Random.value < punchChance) pattern = AttackPattern.LiquidPunch;
+            else pattern = Random.value < 0.5f ? AttackPattern.FrontShot : AttackPattern.UpperWave;
         }
         else
         {
             float chance = player.ForwardOffset <= Mathf.Min(farRangeOffset, nearAttackStartOffset) ? farWaveChance : middleWaveChance;
             pattern = Random.value < chance ? AttackPattern.UpperWave : AttackPattern.FrontShot;
         }
+        lastAttackWasPunch = pattern == AttackPattern.LiquidPunch;
     }
 
     private void LockTrajectory()
@@ -278,7 +303,9 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         {
             launchPosition = PredictionPosition + player.TrackingForwardDirection * Mathf.Max(3f, frontAttackDistance);
             float clearance = Mathf.Max(0.5f, player.StandingBodyHeight);
-            frontShotLifetime = activeFlightDuration * (1f + clearance / Mathf.Max(0.01f, Vector3.Distance(launchPosition, aimPosition)));
+            float aimDistance = Mathf.Max(0.01f, Vector3.Distance(launchPosition, aimPosition));
+            float rearDistance = Vector3.Dot(launchPosition - player.GetRearmostStandingPosition(targetHeight), player.TrackingForwardDirection);
+            frontShotLifetime = activeFlightDuration * (Mathf.Max(aimDistance, rearDistance) + clearance) / aimDistance;
         }
     }
 
@@ -360,7 +387,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
                 BeginSplash(hitPosition);
                 return;
             }
-            if (threatenedAtLock && !attackHit && !dodgeReported && player.HasAttackPassed(nextPosition, aimPosition - launchPosition, AttackRadius))
+            if (!attackHit && !dodgeReported && player.HasAttackPassed(nextPosition, aimPosition - launchPosition, AttackRadius))
             {
                 dodgeReported = true;
                 player.ReportDodge();
@@ -407,7 +434,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
                 attackHit = true;
                 SetColor(new Color(0.85f, 1f, 1f));
             }
-            else if (threatenedAtLock && !dodgeReported)
+            else if (!dodgeReported)
             {
                 dodgeReported = true;
                 player.ReportDodge();
@@ -422,7 +449,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         for (int index = 1; index <= 12; index++)
         {
             Vector3 next = PunchFistPosition(index / 12f, 1f);
-            if (player.TryReceiveAttack(previous, next, AttackRadius)) return true;
+            if (player.TryReceiveLowAttack(previous, next, AttackRadius)) return true;
             previous = next;
         }
         return false;
@@ -589,7 +616,6 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         if (effect != null) effect.SetActive(false);
         phase = Phase.Waiting;
         elapsed = 0f;
-        threatenedAtLock = false;
         attackHit = false;
         waitDuration = activeRecoveryDuration;
     }

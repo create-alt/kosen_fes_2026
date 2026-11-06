@@ -71,9 +71,15 @@ public sealed class FightGameUI : MonoBehaviour
         view = references;
     }
 
+    public void ApplySelectionLayout(Action<GameObject> created = null, Action<Transform, Transform> reparent = null)
+    {
+        FightSelectionLayout.Apply(view, selection, created, reparent);
+    }
+
     private void Awake()
     {
         if (player == null || selection == null || view == null) return;
+        ApplySelectionLayout();
         BoxingArenaBackdrop.Install(player);
         GameObject overlay = new GameObject("CombatFeedback", typeof(RectTransform), typeof(CanvasRenderer), typeof(CombatFeedback));
         overlay.transform.SetParent(transform, false);
@@ -126,10 +132,11 @@ public sealed class FightGameUI : MonoBehaviour
         selectedEnemy = index;
         for (int choice = 0; choice < view.enemyFaces.Length; choice++)
         {
-            view.enemyFaces[choice].color = choice == index ? new Color(0.08f, 0.23f, 0.26f) : Panel;
+            view.enemyFaces[choice].color = choice == index ? Color.Lerp(Panel, FightSelectionLayout.EnemyAccent(selection.GetEnemy(choice)), 0.2f) : Panel;
             view.selectedMarks[choice].SetActive(choice == index);
         }
         view.chosenEnemy.text = "選択中：" + EnemyName(selection.GetEnemy(index));
+        RefreshSettings();
     }
 
     public void ChooseDifficulty(int index)
@@ -142,6 +149,11 @@ public sealed class FightGameUI : MonoBehaviour
     {
         for (int index = 0; index < view.difficultyFaces.Length; index++) view.difficultyFaces[index].color = index == selectedDifficulty ? new Color(0.08f, 0.36f, 0.34f) : new Color(0.12f, 0.18f, 0.27f);
         view.difficultyHelp.text = selectedDifficulty == 0 ? "予告は長め。連射は1発ずつ。" : selectedDifficulty == 2 ? "速めのテンポ。連射が増えます。" : "敵HPに合わせて3段階で変化します。";
+        GameObject chosen = selection.GetEnemy(selectedEnemy);
+        if (chosen != null && chosen.GetComponentInChildren<HybridBossAttack>(true) != null)
+        {
+            view.difficultyHelp.text = selectedDifficulty == 0 ? "高難易度の敵です。予告と休憩を長めにします。" : selectedDifficulty == 2 ? "短い予告で波と最大5連射が重なります。" : "しゃがみ波と3～5連射。HP低下で複合攻撃になります。";
+        }
         view.volumeValue.text = Mathf.RoundToInt(view.volume.value * 100f) + "%";
         view.inputHelp.text = view.keyboard.isOn ? "Space：パンチ   W / S：前後   A / D：左右\n↑ / ↓：高さ   J：しゃがむ   Home：姿勢リセット" : "画像認識からの動きで操作します。\nキーボードのテスト操作はOFFです。";
     }
@@ -272,6 +284,7 @@ public sealed class FightGameUI : MonoBehaviour
     private static string EnemyName(GameObject enemy)
     {
         if (enemy == null) return "ENEMY";
+        if (enemy.GetComponentInChildren<HybridBossAttack>(true) != null) return "HYBRID OVERDRIVE";
         return enemy.GetComponentInChildren<DilatantEnemy>(true) != null ? "DILATANT SENTINEL" : "PUNCHBOT";
     }
 }

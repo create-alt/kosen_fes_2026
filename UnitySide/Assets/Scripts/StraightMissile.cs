@@ -25,7 +25,6 @@ public class StraightMissile : MonoBehaviour
     private float minimumPredictionTime = 1.6f;
     private Transform attackOwner;
     private int battleVersion;
-    private bool threatenedAtLock;
     private bool dodgeReported;
 
     public static event Action<StraightMissile, Vector3> PredictionStarted;
@@ -44,7 +43,6 @@ public class StraightMissile : MonoBehaviour
         targetPlayer = target != null ? target.GetComponentInParent<PlayerController>() : null;
         battleVersion = targetPlayer != null ? targetPlayer.BattleVersion : 0;
         flyingIncoming = false;
-        threatenedAtLock = false;
         dodgeReported = false;
         BeginFlight(moveDirection, maxDistance, rotation);
         initialized = true;
@@ -63,7 +61,8 @@ public class StraightMissile : MonoBehaviour
     {
         if (!initialized) return;
         PunchBotMotion ownerMotion = attackOwner != null ? attackOwner.GetComponentInChildren<PunchBotMotion>() : null;
-        if (targetPlayer != null && (!targetPlayer.GameplayEnabled || targetPlayer.IsFinisherRush || targetPlayer.IsDead || battleVersion != targetPlayer.BattleVersion || (attackOwner != null && (!attackOwner.gameObject.activeInHierarchy || (ownerMotion != null && ownerMotion.IsDead)))))
+        DilatantEnemy ownerLiquid = attackOwner != null ? attackOwner.GetComponentInChildren<DilatantEnemy>() : null;
+        if (targetPlayer != null && (!targetPlayer.GameplayEnabled || targetPlayer.IsFinisherRush || targetPlayer.IsDead || battleVersion != targetPlayer.BattleVersion || (attackOwner != null && (!attackOwner.gameObject.activeInHierarchy || (ownerMotion != null && ownerMotion.IsDead) || (ownerLiquid != null && ownerLiquid.IsDead)))))
         {
             initialized = false;
             EndPrediction();
@@ -98,7 +97,7 @@ public class StraightMissile : MonoBehaviour
             return;
         }
 
-        if (flyingIncoming && threatenedAtLock && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, AttackRadius))
+        if (flyingIncoming && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, AttackRadius))
         {
             dodgeReported = true;
             targetPlayer.ReportDodge();
@@ -127,7 +126,6 @@ public class StraightMissile : MonoBehaviour
         float aimDistance = Vector3.Distance(transform.position, PredictionPosition);
         float rearDistance = targetPlayer != null ? Vector3.Dot(transform.position - targetPlayer.GetRearmostStandingPosition(0.5f), forward) : aimDistance;
         float clearance = targetPlayer != null ? Mathf.Max(0.5f, targetPlayer.StandingBodyHeight) : 1f;
-        threatenedAtLock = targetPlayer != null && targetPlayer.WouldReceiveLateralAttack(transform.position, PredictionPosition + moveDirection * clearance, AttackRadius);
         IncomingDirection = transform.position - PredictionPosition;
         PlayerForwardDirection = targetPlayer != null ? targetPlayer.TrackingForwardDirection : Vector3.forward;
         flyingIncoming = true;
@@ -143,6 +141,15 @@ public class StraightMissile : MonoBehaviour
         maxSpeed = Mathf.Min(maxSpeed, difficulty.MissileSpeed);
         attackOwner = owner;
         if (targetPlayer != null && targetPlayer.StandingBodyHeight > 0f) hitRadius = Mathf.Min(hitRadius, targetPlayer.StandingBodyHeight * 0.06f);
+    }
+
+    public void ConfigureBossFlight(float telegraph, float speed, Transform owner)
+    {
+        minimumPredictionTime = Mathf.Max(0.9f, telegraph);
+        predictionTime = minimumPredictionTime;
+        maxSpeed = Mathf.Clamp(speed, 0.01f, 6f);
+        attackOwner = owner;
+        if (showingPrediction) waitRemaining = minimumPredictionTime;
     }
 
     private void BeginFlight(Vector3 moveDirection, float maxDistance, Quaternion rotation)

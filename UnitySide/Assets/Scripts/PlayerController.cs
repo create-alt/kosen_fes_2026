@@ -414,6 +414,20 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
+    public bool WouldReceiveLowAttack(Vector3 start, Vector3 end, float radius)
+    {
+        float downwardReach = Mathf.Max(0f, Mathf.Max(start.y, end.y) - GetStandingPosition(0f).y);
+        return IntersectsBody(start, end, radius, out _, false, downwardReach);
+    }
+
+    public bool TryReceiveLowAttack(Vector3 start, Vector3 end, float radius)
+    {
+        float downwardReach = Mathf.Max(0f, Mathf.Max(start.y, end.y) - GetStandingPosition(0f).y);
+        if (!IntersectsBody(start, end, radius, out _, false, downwardReach)) return false;
+        TakeDamage();
+        return true;
+    }
+
     public bool HasAttackPassed(Vector3 position, Vector3 direction, float radius)
     {
         if (bodyCollider == null || !bodyCollider.enabled || !gameplayEnabled) return false;
@@ -440,7 +454,7 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
-    private bool IntersectsBody(Vector3 start, Vector3 end, float radius, out Vector3 hitPosition, bool ignoreHeight = false)
+    private bool IntersectsBody(Vector3 start, Vector3 end, float radius, out Vector3 hitPosition, bool ignoreHeight = false, float downwardReach = 0f)
     {
         hitPosition = start;
         if (!gameplayEnabled || !isActiveAndEnabled || bodyCollider == null || !bodyCollider.enabled || !bodyCollider.gameObject.activeInHierarchy) return false;
@@ -449,7 +463,8 @@ public class PlayerController : MonoBehaviour
         Vector3 scale = body.lossyScale;
         float padding = Mathf.Max(0f, radius);
         Vector3 localPadding = new Vector3(padding / Mathf.Max(0.0001f, Mathf.Abs(scale.x)), padding / Mathf.Max(0.0001f, Mathf.Abs(scale.y)), padding / Mathf.Max(0.0001f, Mathf.Abs(scale.z)));
-        Bounds bounds = new Bounds(bodyCollider.center, bodyCollider.size + localPadding * 2f);
+        float localDownwardReach = Mathf.Max(0f, downwardReach) / Mathf.Max(0.0001f, Mathf.Abs(scale.y));
+        Bounds bounds = new Bounds(bodyCollider.center + Vector3.up * (localDownwardReach * 0.5f), bodyCollider.size + localPadding * 2f + Vector3.up * localDownwardReach);
         Vector3 localStart = body.InverseTransformPoint(start);
         Vector3 localEnd = body.InverseTransformPoint(end);
         if (ignoreHeight)
