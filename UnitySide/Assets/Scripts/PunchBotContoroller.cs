@@ -31,6 +31,7 @@ public class PunchBotContoroller : MonoBehaviour
     private bool punchPredictionActive;
     private bool punchWindingUp;
     private bool closePressure;
+    private bool punchThreatened;
     private float punchWindupRemaining;
     private int queuedMissiles;
     private double nextMissileTime;
@@ -178,6 +179,7 @@ public class PunchBotContoroller : MonoBehaviour
         }
 
         punchPosition = trackedPlayer.GetStandingPosition(punchHeight);
+        punchThreatened = trackedPlayer.WouldReceiveAttack(punchPosition, punchPosition, punchHitRadius);
         punching = true;
         attacking = true;
         punchWindingUp = true;
@@ -221,8 +223,10 @@ public class PunchBotContoroller : MonoBehaviour
     private void HitWithPunch()
     {
         EndPunchPrediction();
-        if (!attacking || !punching || !CanAttack() || !trackedPlayer.IsInEnemyPunchRange) return;
-        trackedPlayer.TryReceiveAttack(punchPosition, punchPosition, punchHitRadius);
+        if (!attacking || !punching || !CanAttack()) return;
+        bool hit = trackedPlayer.IsInEnemyPunchRange && trackedPlayer.TryReceiveAttack(punchPosition, punchPosition, punchHitRadius);
+        if (!hit && punchThreatened) trackedPlayer.ReportDodge();
+        punchThreatened = false;
     }
 
     private void SpawnMissile()

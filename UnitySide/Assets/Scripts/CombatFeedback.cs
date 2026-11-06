@@ -13,6 +13,8 @@ public sealed class CombatFeedback : MaskableGraphic
     private Text hitLabel;
     private Text finishLabel;
     private Text finishDetail;
+    private Text dodgeLabel;
+    private float dodgeAge = 10f;
     private Vector2 impact;
     private PunchResult lastResult;
     private float hitAge = 10f;
@@ -30,10 +32,13 @@ public sealed class CombatFeedback : MaskableGraphic
             if (camera.targetDisplay == 0) frontCamera = camera;
         }
         raycastTarget = false;
-        hitLabel = MakeLabel("PunchResult", font, 44);
+        hitLabel = MakeLabel("PunchResult", font, 68);
         finishLabel = MakeLabel("Knockout", font, 134);
         finishLabel.rectTransform.sizeDelta = new Vector2(1600f, 360f);
         finishDetail = MakeLabel("ClearMessage", font, 38);
+        dodgeLabel = MakeLabel("DodgeSuccess", font, 64);
+        dodgeLabel.text = "DODGE!";
+        player.Dodged += ShowDodge;
         player.PunchResolved += ShowPunch;
         ResetEffects();
     }
@@ -70,6 +75,12 @@ public sealed class CombatFeedback : MaskableGraphic
         SetVerticesDirty();
     }
 
+    private void ShowDodge()
+    {
+        if (IsCelebrating) return;
+        dodgeAge = 0f;
+    }
+
     public void PlayVictory()
     {
         victoryAge = 0f;
@@ -84,7 +95,9 @@ public sealed class CombatFeedback : MaskableGraphic
     public void ResetEffects()
     {
         hitAge = 10f;
+        dodgeAge = 10f;
         victoryAge = 10f;
+        if (dodgeLabel != null) dodgeLabel.enabled = false;
         if (hitLabel != null) hitLabel.enabled = false;
         if (finishLabel != null) finishLabel.enabled = false;
         if (finishDetail != null) finishDetail.enabled = false;
@@ -100,12 +113,20 @@ public sealed class CombatFeedback : MaskableGraphic
             ResetEffects();
             return;
         }
+        dodgeAge += Time.unscaledDeltaTime;
+        dodgeLabel.enabled = dodgeAge < 0.7f && !IsCelebrating;
+        if (dodgeLabel.enabled)
+        {
+            dodgeLabel.rectTransform.anchoredPosition = new Vector2(0f, -rectTransform.rect.height * 0.2f + dodgeAge * 35f);
+            dodgeLabel.rectTransform.localScale = Vector3.one * (1f + 0.15f * Mathf.Exp(-dodgeAge * 12f));
+            dodgeLabel.color = new Color(0.2f, 1f, 0.85f, 1f - Mathf.Clamp01((dodgeAge - 0.35f) / 0.35f));
+        }
         hitAge += Time.unscaledDeltaTime;
         victoryAge += Time.unscaledDeltaTime;
         hitLabel.enabled = hitAge < 0.55f && !IsCelebrating;
         if (hitLabel.enabled)
         {
-            hitLabel.rectTransform.anchoredPosition = impact + Vector2.up * (80f + hitAge * 70f);
+            hitLabel.rectTransform.anchoredPosition = impact + Vector2.up * (140f + hitAge * 90f);
             hitLabel.rectTransform.localScale = Vector3.one * (1f + 0.3f * Mathf.Exp(-hitAge * 18f));
             Color tint = hitLabel.color;
             tint.a = 1f - Mathf.Clamp01((hitAge - 0.25f) / 0.3f);
@@ -119,7 +140,7 @@ public sealed class CombatFeedback : MaskableGraphic
             finishLabel.rectTransform.localScale = Vector3.one * Mathf.Lerp(1.65f, 1f, Mathf.Clamp01(victoryAge / 0.18f));
             finishDetail.rectTransform.anchoredPosition = Vector2.down * 85f;
         }
-        if (hitAge < 0.65f || victoryAge < 3.1f) SetVerticesDirty();
+        if (hitAge < 0.65f || dodgeAge < 0.8f || victoryAge < 3.1f) SetVerticesDirty();
     }
 
     protected override void OnPopulateMesh(VertexHelper mesh)
@@ -129,14 +150,18 @@ public sealed class CombatFeedback : MaskableGraphic
         {
             Color tint = lastResult == PunchResult.Hit ? Gold : new Color(0.4f, 0.85f, 1f);
             tint.a = 1f - hitAge / 0.4f;
-            float radius = 22f + hitAge * 190f;
-            Ring(mesh, impact, radius, 7f, tint);
+            float radius = 48f + hitAge * 340f;
+            Ring(mesh, impact, radius, 12f, tint);
             for (int index = 0; index < 12; index++)
             {
                 float angle = index * Mathf.PI / 6f;
                 Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                Line(mesh, impact + direction * (radius + 8f), impact + direction * (radius + 32f), 5f, tint);
+                Line(mesh, impact + direction * (radius + 14f), impact + direction * (radius + 58f), 9f, tint);
             }
+        }
+        if (dodgeAge < 0.5f && !IsCelebrating)
+        {
+            Ring(mesh, new Vector2(0f, -rectTransform.rect.height * 0.2f), 120f + dodgeAge * 180f, 10f, new Color(0.2f, 1f, 0.85f, (1f - dodgeAge / 0.5f) * 0.6f));
         }
         if (!IsCelebrating) return;
         Rect bounds = rectTransform.rect;
@@ -190,7 +215,11 @@ public sealed class CombatFeedback : MaskableGraphic
 
     protected override void OnDestroy()
     {
-        if (player != null) player.PunchResolved -= ShowPunch;
+        if (player != null)
+        {
+            player.PunchResolved -= ShowPunch;
+            player.Dodged -= ShowDodge;
+        }
         base.OnDestroy();
     }
 }

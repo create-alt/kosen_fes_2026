@@ -11,6 +11,7 @@ internal sealed class UdpTrackingInput : IDisposable
     {
         public float forward = float.NaN;
         public float head = float.NaN;
+        public float depth;
         public float punch = -1f;
     }
 
@@ -63,7 +64,7 @@ internal sealed class UdpTrackingInput : IDisposable
                 continue;
             }
 
-            bool validPose = packet.forward >= 0f && packet.forward <= 1f && packet.head >= 0f && packet.head <= 1f;
+            bool validPose = packet.forward >= 0f && packet.forward <= 1f && packet.head >= 0f && packet.head <= 1f && packet.depth >= -1f && packet.depth <= 1f;
             bool validPunch = packet.punch == 0f || packet.punch == 1f;
             if (!validPose || !validPunch)
             {
@@ -76,7 +77,7 @@ internal sealed class UdpTrackingInput : IDisposable
             lastPacketTime = now;
             bool pressed = packet.punch == 1f && !punchHeld;
             punchHeld = packet.punch == 1f;
-            if (player.GameplayEnabled) player.ApplyUdpTracking(packet.forward, packet.head, pressed);
+            if (player.GameplayEnabled) player.ApplyUdpTracking(packet.forward, packet.head, packet.depth, pressed);
         }
 
         return now - lastPacketTime <= InputTimeout;

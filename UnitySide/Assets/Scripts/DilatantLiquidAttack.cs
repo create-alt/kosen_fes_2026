@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [RequireComponent(typeof(DilatantEnemy))]
 public sealed class DilatantLiquidAttack : MonoBehaviour
@@ -14,10 +15,9 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     [SerializeField, Min(0.01f)] private float hitRadius = 0.14f;
     [SerializeField, Range(-1f, 1f)] private float nearAttackStartOffset = 0f;
     [SerializeField, Range(-1f, 1f)] private float farRangeOffset = -0.25f;
-    [SerializeField, Range(0f, 1f)] private float farHighJetChance = 0.8f;
-    [SerializeField, Range(0f, 1f)] private float middleHighJetChance = 0.7f;
-    [SerializeField, Min(0.5f)] private float sideAttackDistance = 3f;
-    [SerializeField, Min(0.1f)] private float additionalFlightTime = 1.5f;
+    [FormerlySerializedAs("farHighJetChance"), SerializeField, Range(0f, 1f)] private float farWaveChance = 0.8f;
+    [FormerlySerializedAs("middleHighJetChance"), SerializeField, Range(0f, 1f)] private float middleWaveChance = 0.7f;
+    [FormerlySerializedAs("sideAttackDistance"), SerializeField, Min(0.5f)] private float frontAttackDistance = 3f;
     [SerializeField, Min(0.05f)] private float liquidPunchDuration = 0.45f;
     [SerializeField, Min(0.01f)] private float liquidPunchImpactTime = 0.18f;
     [SerializeField, Min(0.1f)] private float liquidPunchReach = 0.9f;
@@ -25,7 +25,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     [SerializeField] private bool showPrediction = true;
 
     private enum Phase { Waiting, Charging, Flying, Splash }
-    public enum AttackPattern { SideShot, HighJet, LiquidPunch }
+    public enum AttackPattern { FrontShot, UpperWave, LiquidPunch }
 
     public static event System.Action<DilatantLiquidAttack> PredictionStarted;
     public static event System.Action<DilatantLiquidAttack> PredictionEnded;
@@ -35,7 +35,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     public Vector3 IncomingDirection => launchPosition - PredictionPosition;
     public Vector3 PlayerForwardDirection => player != null ? player.TrackingForwardDirection : Vector3.forward;
     public float ChargeProgress => Mathf.Clamp01(elapsed / activeChargeDuration);
-    public Color PredictionColor => pattern == AttackPattern.SideShot ? new Color(1f, 0.65f, 0.05f) : pattern == AttackPattern.LiquidPunch ? new Color(0.15f, 0.85f, 1f) : new Color(1f, 0.15f, 0.15f);
+    public Color PredictionColor => pattern == AttackPattern.FrontShot ? new Color(1f, 0.65f, 0.05f) : pattern == AttackPattern.LiquidPunch ? new Color(0.15f, 0.85f, 1f) : new Color(1f, 0.15f, 0.15f);
 
     private DilatantEnemy enemy;
     private Phase phase;
@@ -43,7 +43,6 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private float waitDuration;
     private AttackPattern pattern;
     private float simulatedFlightTime;
-    private Vector3 waveSide;
     private Vector3 launchPosition;
     private Vector3 aimPosition;
     private Vector3 previousPosition;
@@ -56,7 +55,11 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private float activeChargeDuration = 1.6f;
     private float activeFlightDuration = 1.3f;
     private float activeRecoveryDuration = 1.8f;
-    private float highJetLifetime;
+    private float waveLifetime;
+    private float waveHalfWidth;
+    private float frontShotLifetime;
+    private bool threatenedAtLock;
+    private bool attackHit;
     private int battleVersion;
     private bool punchPoseActive;
     private bool rangedPoseActive;
@@ -137,7 +140,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
         punchBody.localPosition = bodyRestPosition + new Vector3(0f, -0.07f * load + 0.03f * thrust, -0.1f * load + 0.2f * thrust);
         punchBody.localScale = Vector3.Scale(bodyRestScale, new Vector3(1f + 0.1f * load - 0.05f * thrust, 1f - 0.1f * load + 0.08f * thrust, 1f + 0.1f * load + 0.12f * thrust));
-        if (pattern == AttackPattern.HighJet)
+        if (pattern == AttackPattern.UpperWave)
         {
             punchBody.localRotation = bodyRestRotation * Quaternion.Euler(5f * load - 10f * thrust, 0f, 0f);
             punchArm.localPosition = armRestPosition + Vector3.forward * (-0.09f * load + 0.16f * thrust);
@@ -146,13 +149,10 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
         else
         {
-            float side = Vector3.Dot(launchPosition - aimPosition, transform.right) >= 0f ? 1f : -1f;
-            punchBody.localRotation = bodyRestRotation * Quaternion.Euler(-5f * thrust, side * (32f * load - 42f * thrust), -side * 7f * load);
-            Quaternion sweep = Quaternion.Euler(-35f * load - 75f * thrust, side * (40f * load - 65f * thrust), -side * 38f * load);
-            Quaternion guard = Quaternion.Euler(-55f * load, 0f, 0f);
-            punchArm.localPosition = armRestPosition;
-            punchArm.localRotation = armRestRotation * (side > 0f ? sweep : guard);
-            guardArm.localRotation = guardRestRotation * (side > 0f ? guard : sweep);
+            punchBody.localRotation = bodyRestRotation * Quaternion.Euler(-5f * thrust, 18f * load - 24f * thrust, -5f * load);
+            punchArm.localPosition = armRestPosition + Vector3.forward * (-0.08f * load + 0.16f * thrust);
+            punchArm.localRotation = armRestRotation * Quaternion.Euler(-50f * load * (1f - thrust) - 95f * thrust, -15f * thrust, -10f * load);
+            guardArm.localRotation = guardRestRotation * Quaternion.Euler(-55f * load, 0f, 12f * load);
         }
     }
 
@@ -215,6 +215,9 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
         else if (pattern == AttackPattern.LiquidPunch) activeChargeDuration = Mathf.Max(1.5f, activeChargeDuration);
         LockTrajectory();
+        attackHit = false;
+        Vector3 threatShift = pattern == AttackPattern.UpperWave ? player.TrackingRightDirection * Vector3.Dot(player.GetStandingPosition(0.85f) - aimPosition, player.TrackingRightDirection) : Vector3.zero;
+        threatenedAtLock = player.WouldReceiveAttack(launchPosition + threatShift, aimPosition + threatShift, AttackRadius);
         SetColor(LiquidColor);
         effect.SetActive(true);
         if (showPrediction)
@@ -229,12 +232,12 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     {
         if (InPunchReach())
         {
-            pattern = player.IsTooClose || Random.value >= 0.5f ? AttackPattern.LiquidPunch : AttackPattern.SideShot;
+            pattern = player.IsTooClose || Random.value >= 0.5f ? AttackPattern.LiquidPunch : AttackPattern.FrontShot;
         }
         else
         {
-            float chance = player.ForwardOffset <= Mathf.Min(farRangeOffset, nearAttackStartOffset) ? farHighJetChance : middleHighJetChance;
-            pattern = Random.value < chance ? AttackPattern.HighJet : AttackPattern.SideShot;
+            float chance = player.ForwardOffset <= Mathf.Min(farRangeOffset, nearAttackStartOffset) ? farWaveChance : middleWaveChance;
+            pattern = Random.value < chance ? AttackPattern.UpperWave : AttackPattern.FrontShot;
         }
     }
 
@@ -250,24 +253,27 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
 
         launchPosition = EmissionPosition();
-        float targetHeight = pattern == AttackPattern.HighJet ? 0.85f : 0.3f;
+        float targetHeight = pattern == AttackPattern.UpperWave ? 0.85f : 0.5f;
         aimPosition = player.GetStandingPosition(targetHeight);
         PredictionPosition = aimPosition;
         launchPosition.y = aimPosition.y;
-        if (pattern == AttackPattern.HighJet)
+        if (pattern == AttackPattern.UpperWave)
         {
+            aimPosition += player.TrackingRightDirection * (player.DepthOffset * player.TrackingLateralRange);
+            PredictionPosition = aimPosition;
+            float forwardDistance = Mathf.Max(3f, Vector3.Dot(launchPosition - aimPosition, player.TrackingForwardDirection));
+            launchPosition = aimPosition + player.TrackingForwardDirection * forwardDistance;
+            waveHalfWidth = player.TrackingLateralRange + Mathf.Max(0.5f, player.StandingBodyHeight * 0.25f);
             float aimDistance = Mathf.Max(0.01f, Vector3.Distance(launchPosition, aimPosition));
             float rearDistance = Vector3.Distance(launchPosition, player.GetRearmostStandingPosition(targetHeight));
             float clearance = Mathf.Max(0.5f, player.StandingBodyHeight);
-            highJetLifetime = activeFlightDuration * Mathf.Max(1.08f, (rearDistance + clearance) / aimDistance);
+            waveLifetime = activeFlightDuration * Mathf.Max(1.08f, (rearDistance + clearance) / aimDistance);
         }
-        Vector3 horizontal = Vector3.ProjectOnPlane(aimPosition - launchPosition, Vector3.up);
-        if (horizontal.sqrMagnitude < 0.0001f) horizontal = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
-        if (horizontal.sqrMagnitude < 0.0001f) horizontal = Vector3.forward;
-        waveSide = Vector3.Cross(Vector3.up, horizontal.normalized);
-        if (pattern == AttackPattern.SideShot)
+        if (pattern == AttackPattern.FrontShot)
         {
-            launchPosition = PredictionPosition + waveSide * (Random.value < 0.5f ? -sideAttackDistance : sideAttackDistance);
+            launchPosition = PredictionPosition + player.TrackingForwardDirection * Mathf.Max(3f, frontAttackDistance);
+            float clearance = Mathf.Max(0.5f, player.StandingBodyHeight);
+            frontShotLifetime = activeFlightDuration * (1f + clearance / Mathf.Max(0.01f, Vector3.Distance(launchPosition, aimPosition)));
         }
     }
 
@@ -306,7 +312,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private void Launch()
     {
-        BattleAudio.Play(pattern == AttackPattern.LiquidPunch ? FightSound.EnemyPunch : FightSound.Liquid, pattern == AttackPattern.SideShot ? Vector3.Dot(player.transform.right, IncomingDirection.normalized) : 0f);
+        BattleAudio.Play(pattern == AttackPattern.LiquidPunch ? FightSound.EnemyPunch : FightSound.Liquid);
         previousPosition = launchPosition;
         simulatedFlightTime = 0f;
         punchImpactApplied = false;
@@ -329,7 +335,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
 
         float duration = activeFlightDuration;
-        float lifetime = pattern == AttackPattern.HighJet ? highJetLifetime : duration + additionalFlightTime;
+        float lifetime = pattern == AttackPattern.UpperWave ? waveLifetime : frontShotLifetime;
         float endTime = Mathf.Min(elapsed, lifetime);
         int steps = Mathf.Clamp(Mathf.CeilToInt((endTime - simulatedFlightTime) / 0.03f), 1, 128);
         float startTime = simulatedFlightTime;
@@ -350,14 +356,24 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         Quaternion rotation = direction.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(direction) : Quaternion.identity;
         for (int index = 0; index < drops.Length; index++)
         {
-            float tailProgress = Mathf.Max(0f, progress - index * 0.025f);
-            float size = AttackRadius * 2f * (1f - index * 0.09f);
-            drops[index].position = FlightPosition(tailProgress);
-            drops[index].rotation = rotation;
-            drops[index].localScale = new Vector3(size, size * (1f + 0.12f * Mathf.Sin(elapsed * 18f + index)), size * 1.4f);
+            if (pattern == AttackPattern.UpperWave)
+            {
+                float across = Mathf.Lerp(-waveHalfWidth, waveHalfWidth, index / (float)(drops.Length - 1));
+                drops[index].position = FlightPosition(progress) + player.TrackingRightDirection * across + Vector3.up * (0.02f * Mathf.Sin(elapsed * 12f + index));
+                drops[index].rotation = Quaternion.LookRotation(-player.TrackingForwardDirection, Vector3.up);
+                drops[index].localScale = new Vector3(waveHalfWidth * 2f / (drops.Length - 1) * 1.4f, AttackRadius * 2.5f, 0.35f);
+            }
+            else
+            {
+                float tailProgress = Mathf.Max(0f, progress - index * 0.025f);
+                float size = AttackRadius * 2f * (1f - index * 0.09f);
+                drops[index].position = FlightPosition(tailProgress);
+                drops[index].rotation = rotation;
+                drops[index].localScale = new Vector3(size, size * (1f + 0.12f * Mathf.Sin(elapsed * 18f + index)), size * 1.4f);
+            }
         }
 
-        if (elapsed >= lifetime) CancelAttack();
+        if (elapsed >= lifetime) CompleteAttack();
     }
 
     private void SwingLiquidPunch()
@@ -371,10 +387,11 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
             punchImpactApplied = true;
             if (InPunchReach() && TryHitWithPunch())
             {
+                attackHit = true;
                 SetColor(new Color(0.85f, 1f, 1f));
             }
         }
-        if (elapsed >= duration) CancelAttack();
+        if (elapsed >= duration) CompleteAttack();
     }
 
     private bool TryHitWithPunch()
@@ -467,7 +484,21 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private bool TryHit(Vector3 start, Vector3 end, out Vector3 hitPosition)
     {
-        return player.TryReceiveAttack(start, end, AttackRadius, out hitPosition);
+        if (pattern == AttackPattern.UpperWave)
+        {
+            float offset = Vector3.Dot(player.GetStandingPosition(0.85f) - start, player.TrackingRightDirection);
+            if (Mathf.Abs(offset) > waveHalfWidth + AttackRadius)
+            {
+                hitPosition = start;
+                return false;
+            }
+            Vector3 shift = player.TrackingRightDirection * offset;
+            start += shift;
+            end += shift;
+        }
+        bool hit = player.TryReceiveAttack(start, end, AttackRadius, out hitPosition);
+        if (hit) attackHit = true;
+        return hit;
     }
 
     private void BeginSplash(Vector3 position)
@@ -527,6 +558,12 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         foreach (Transform drop in drops) drop.GetComponent<Renderer>().SetPropertyBlock(properties);
     }
 
+    private void CompleteAttack()
+    {
+        if (threatenedAtLock && !attackHit) player.ReportDodge();
+        CancelAttack();
+    }
+
     private void CancelAttack()
     {
         RestorePunchPose();
@@ -535,6 +572,8 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         if (effect != null) effect.SetActive(false);
         phase = Phase.Waiting;
         elapsed = 0f;
+        threatenedAtLock = false;
+        attackHit = false;
         waitDuration = activeRecoveryDuration;
     }
 

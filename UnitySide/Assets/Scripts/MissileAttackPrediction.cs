@@ -73,7 +73,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
     private void ShowPrediction(StraightMissile missile, Vector3 position)
     {
         if (predictionLineTemplate == null || targetCamera == null) return;
-        if (!AttackPredictionScreen.FacesSource(targetCamera, missile.IncomingDirection)) return;
+        if (targetCamera.targetDisplay != 0 && !AttackPredictionScreen.FacesSource(targetCamera, missile.IncomingDirection)) return;
         foreach (Prediction existing in predictions)
         {
             if (existing.Missile == missile) return;
@@ -119,7 +119,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         Vector3 reference = cameraTransform.position + Vector3.ProjectOnPlane(relative, cameraTransform.forward) + cameraTransform.forward * depth;
         Vector3 viewport = targetCamera.WorldToViewportPoint(reference);
         Rect cameraRect = targetCamera.rect;
-        bool vertical = Mathf.Abs(Vector3.Dot(cameraTransform.right, prediction.ForwardDirection)) > 0.5f;
+        bool vertical = (prediction.Missile != null && targetCamera.targetDisplay == 0) || Mathf.Abs(Vector3.Dot(cameraTransform.right, prediction.ForwardDirection)) > 0.5f;
         float x = cameraRect.x + Mathf.Clamp(viewport.x, 0.05f, 0.95f) * cameraRect.width;
         float y = cameraRect.y + Mathf.Clamp(viewport.y, 0.05f, 0.95f) * cameraRect.height;
         RectTransform line = prediction.Line.rectTransform;
@@ -127,7 +127,7 @@ public sealed class MissileAttackPrediction : MonoBehaviour
         line.anchorMax = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.95f) : new Vector2(cameraRect.x + cameraRect.width * 0.95f, y);
         line.pivot = new Vector2(0.5f, 0.5f);
         line.anchoredPosition = Vector2.zero;
-        float width = Mathf.Max(6f, lineWidth);
+        float width = Mathf.Max(18f, lineWidth);
         line.sizeDelta = vertical ? new Vector2(width, 0f) : new Vector2(0f, width);
         line.localRotation = Quaternion.identity;
         line.localScale = Vector3.one;
