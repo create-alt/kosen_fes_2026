@@ -175,13 +175,18 @@ python realtime.py [カメラ番号] [--no-display] [--stats] [--calib-key c]
 | `--motion-smooth` | 0.5 | 平滑化(1 でなし) |
 | `--motion-calib-frames` | 30 | 自動キャリブレーションのフレーム数(動画・`--no-display`) |
 
+### 奥行き(手前・奥)
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `--depth-range` | 1.5 | 体幹(肩〜腰)の長さが基準の何倍で `depth` が -1(手前)になるか。逆数のとき +1(奥) |
+
 ### 毎フレームの出力
 | 引数 | 既定 | 意味 |
 |---|---|---|
 | `--quiet` | - | コンソールに出さない(UDP は続く) |
 | `--format` | `text` | `text`(1行)/ `json` |
 | `--print-every` | 1 | N フレームに 1 回出す(パンチは必ず出る) |
-| `--udp HOST:PORT` | - | 毎フレーム `{forward, head, feet, punch}` の JSON を Unity へ UDP で送る(例 `127.0.0.1:5005`) |
+| `--udp HOST:PORT` | - | 毎フレーム `{forward, head, depth, feet, punch}` の JSON を Unity へ UDP で送る(例 `127.0.0.1:5005`) |
 | `--udp-full` | - | UDP にも全項目(手・punch・punches・バッグ・動き量)を送る |
 
 ### `main.py` のみ

@@ -73,6 +73,11 @@ def add_pipeline_args(parser):
     g.add_argument("--motion-calib-frames", type=int, default=30,
                    help="Video / --no-display: frames at the start used for the reference position (default: 30)")
 
+    g = parser.add_argument_group("奥行き(手前・奥)")
+    g.add_argument("--depth-range", type=float, default=1.5,
+                   help="Torso-length ratio that maps to the ends of depth: 1.5x longer than at calibration = -1 (near), "
+                        "1/1.5 = +1 (far) (default: 1.5)")
+
     g = parser.add_argument_group("毎フレームの出力 (print / Unity)")
     g.add_argument("--quiet", action="store_true", help="Do not print the per-frame output (UDP still works)")
     g.add_argument("--format", dest="fmt", choices=["text", "json"], default="text",

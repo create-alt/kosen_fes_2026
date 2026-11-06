@@ -54,7 +54,7 @@ class Pipeline:
         )
         self.motion = None
         if pose is not None and not args.no_motion:
-            self.motion = BodyMotion(motion_auto_frames, args.motion_smooth, args.forward_direction)
+            self.motion = BodyMotion(motion_auto_frames, args.motion_smooth, args.forward_direction, depth_range=args.depth_range)
         self.bag = self.person = None
 
     @property
@@ -94,7 +94,8 @@ class Pipeline:
             bag_deviation=j.deviation if (self.bag and j.calibrated) else None,
             vertical=reading.vertical if reading else None, forward=reading.forward if reading else None,
             vertical_px=reading.vertical_px if reading else None, forward_px=reading.forward_px if reading else None,
-            game_forward=forward, game_head=head,
+            game_forward=forward, game_head=head, game_depth=reading.depth if reading else None,
+            size_ratio=reading.size_ratio if reading else None,
         )
 
     def close(self):

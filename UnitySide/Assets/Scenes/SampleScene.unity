@@ -4156,7 +4156,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 52
     m_Alignment: 4
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -4234,7 +4234,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2918746239180420911, guid: dc7e3b3abd413c14798d19e85fc11ae0, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -0.5
+      value: -0.7
       objectReference: {fileID: 0}
     - target: {fileID: 2918746239180420911, guid: dc7e3b3abd413c14798d19e85fc11ae0, type: 3}
       propertyPath: m_LocalRotation.w
@@ -4893,7 +4893,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 72
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -6410,7 +6410,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 68
     m_Alignment: 4
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -6760,7 +6760,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 58
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -8023,7 +8023,7 @@ MonoBehaviour:
     m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 10
-    m_MaxSize: 40
+    m_MaxSize: 72
     m_Alignment: 3
     m_AlignByGeometry: 0
     m_RichText: 1
@@ -9074,6 +9074,10 @@ MonoBehaviour:
   target: {fileID: 1791124385}
   bodyCollider: {fileID: 45328633}
   enableKeyboardTest: 1
+  trackingUdpPort: 5005
+  udpPositionSmoothTime: 0.04
+  udpHeightSmoothTime: 0.025
+  lateralMoveDistance: 1.2
   keepCamerasFixed: 0
   testMoveSpeed: 1
   testBodySpeed: 1
@@ -9081,6 +9085,7 @@ MonoBehaviour:
   punchMinimumOffset: -0.25
   enemyPunchOffset: 0.25
   enemySurfacePadding: 0.02
+  maximumForwardTravelRatio: 0.85
   maxHealth: 100
   damageInvulnerability: 0.6
   rushDuration: 5
@@ -14270,8 +14275,9 @@ MonoBehaviour:
   hitRadius: 0.14
   nearAttackStartOffset: 0
   farRangeOffset: -0.25
-  sideAttackDistance: 3
-  additionalFlightTime: 1.5
+  farWaveChance: 0.8
+  middleWaveChance: 0.7
+  frontAttackDistance: 3
   liquidPunchDuration: 0.45
   liquidPunchImpactTime: 0.18
   liquidPunchReach: 0.9
@@ -14306,6 +14312,18 @@ PrefabInstance:
       value: -30.000002
       objectReference: {fileID: 0}
     - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
       objectReference: {fileID: 0}
@@ -14315,7 +14333,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -0.5
+      value: -0.7
       objectReference: {fileID: 0}
     - target: {fileID: 1926639403492981876, guid: 8149992acd498664eb24390c264fb3ae, type: 3}
       propertyPath: m_LocalRotation.w

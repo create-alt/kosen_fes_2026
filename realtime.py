@@ -20,10 +20,10 @@ import cv2
 
 from args import add_pipeline_args, check_args
 from logic import HoldKey
-from output import Reporter, draw_overlay
+from output import Reporter, Screen, draw_overlay
 from pipeline import Pipeline
 
-WINDOW = "Punching Bag (realtime) - press Q to quit"
+WINDOW = "Punching Bag (realtime) (Q: quit, F: fullscreen on/off)"
 
 
 class ThreadedCamera:
@@ -86,6 +86,7 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=60, help="Requested capture fps (default: 60)")
     parser.add_argument("--no-mjpg", action="store_true", help="Do not request MJPG (use if the camera misbehaves)")
     parser.add_argument("--no-display", action="store_true", help="Do not show the video window (faster; stop with Ctrl+C)")
+    parser.add_argument("--windowed", action="store_true", help="Show in a normal window instead of full screen (F toggles)")
     parser.add_argument("--stats", action="store_true", help="Print fps and processing time every 2 seconds")
     parser.add_argument("--calib-key", default="c", help="Key to hold for the head / body reference (default: c)")
     parser.add_argument("--hold-timeout", type=float, default=0.7,
@@ -104,6 +105,7 @@ def main():
         # 表示があるときはキーを押している間、ないときは起動直後の数フレームで、頭・体の基準を測る
         pipeline = Pipeline(args, None if display else args.motion_calib_frames)
         reporter = Reporter(args.fmt, args.quiet, args.print_every, args.udp, args.udp_full)
+        screen = Screen(WINDOW, fullscreen=not args.windowed, size=(args.width, args.height)) if display else None
         hold = HoldKey(args.calib_key, args.hold_timeout) if display else None
         was_held = False
         print("Running. Keep the bag still for the first moments (calibration).")
@@ -133,11 +135,11 @@ def main():
             if display:
                 draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
                              hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
-                cv2.imshow(WINDOW, frame)
+                screen.show(frame)
                 key = cv2.waitKey(1)
                 if hold:
                     hold.feed(key, stamp)
-                if key & 0xFF == ord("q"):
+                if screen.handle_key(key):
                     break
             if args.stats and time.perf_counter() - report_start >= 2.0:
                 elapsed = time.perf_counter() - report_start
