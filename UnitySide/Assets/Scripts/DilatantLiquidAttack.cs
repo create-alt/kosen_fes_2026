@@ -60,6 +60,8 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private float frontShotLifetime;
     private bool threatenedAtLock;
     private bool attackHit;
+    private bool dodgeReported;
+    private float punchRetreatLimit;
     private int battleVersion;
     private bool punchPoseActive;
     private bool rangedPoseActive;
@@ -114,7 +116,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     private void LateUpdate()
     {
         if (enemy == null || enemy.IsDead) return;
-        if (poseAnimator != null && poseAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash != IdleState) return;
+        if (!enemy.PrioritizePunch && poseAnimator != null && poseAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash != IdleState) return;
         if (pattern == AttackPattern.LiquidPunch)
         {
             if (!punchPoseActive) return;
@@ -208,6 +210,9 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         activeFlightDuration = Mathf.Max(flightDuration, difficulty.FlightTime);
         activeRecoveryDuration = Mathf.Max(recoveryDuration, difficulty.Recovery);
         SelectPattern();
+        enemy.PrioritizePunch = pattern == AttackPattern.LiquidPunch;
+        punchRetreatLimit = player.ForwardOffset - 0.12f;
+        dodgeReported = false;
         if (player.IsTooClose && pattern == AttackPattern.LiquidPunch)
         {
             activeChargeDuration = difficulty.PressureTelegraph;
@@ -348,6 +353,11 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
                 BeginSplash(hitPosition);
                 return;
             }
+            if (threatenedAtLock && !attackHit && !dodgeReported && player.HasAttackPassed(nextPosition, aimPosition - launchPosition, AttackRadius))
+            {
+                dodgeReported = true;
+                player.ReportDodge();
+            }
             previousPosition = nextPosition;
         }
         simulatedFlightTime = endTime;
@@ -373,7 +383,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
             }
         }
 
-        if (elapsed >= lifetime) CompleteAttack();
+        if (elapsed >= lifetime) CancelAttack();
     }
 
     private void SwingLiquidPunch()
@@ -385,13 +395,18 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         if (!punchImpactApplied && elapsed >= impactTime)
         {
             punchImpactApplied = true;
-            if (InPunchReach() && TryHitWithPunch())
+            if (player.ForwardOffset >= punchRetreatLimit && InPunchReach() && TryHitWithPunch())
             {
                 attackHit = true;
                 SetColor(new Color(0.85f, 1f, 1f));
             }
+            else if (threatenedAtLock && !dodgeReported)
+            {
+                dodgeReported = true;
+                player.ReportDodge();
+            }
         }
-        if (elapsed >= duration) CompleteAttack();
+        if (elapsed >= duration) CancelAttack();
     }
 
     private bool TryHitWithPunch()
@@ -558,14 +573,9 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         foreach (Transform drop in drops) drop.GetComponent<Renderer>().SetPropertyBlock(properties);
     }
 
-    private void CompleteAttack()
-    {
-        if (threatenedAtLock && !attackHit) player.ReportDodge();
-        CancelAttack();
-    }
-
     private void CancelAttack()
     {
+        if (enemy != null) enemy.PrioritizePunch = false;
         RestorePunchPose();
         RestoreRangedPose();
         EndPrediction();

@@ -26,6 +26,7 @@ public sealed class PunchBotMotion : MonoBehaviour
     private bool punching;
     private bool boxingGuard;
 
+    public bool PrioritizePunch { get; set; }
     public bool IsDead { get; private set; }
     public bool IsAttacking { get; private set; }
     public bool LastAttackInterrupted { get; private set; }
@@ -114,7 +115,7 @@ public sealed class PunchBotMotion : MonoBehaviour
 
     public void PlayHit()
     {
-        if (IsDead) return;
+        if (IsDead || PrioritizePunch) return;
         HitReacted?.Invoke();
         EndMissileAttack(true);
         GetAnimator().Play(HitState, 0, 0f);
@@ -165,6 +166,7 @@ public sealed class PunchBotMotion : MonoBehaviour
 
     private void EndMissileAttack(bool interrupted = false)
     {
+        PrioritizePunch = false;
         if (!IsAttacking) return;
         IsAttacking = false;
         LastAttackInterrupted = interrupted;
