@@ -282,7 +282,14 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         }
     }
 
-    private float AttackRadius => Mathf.Min(hitRadius, player != null && player.StandingBodyHeight > 0f ? player.StandingBodyHeight * 0.06f : 0.06f);
+    private float AttackRadius
+    {
+        get
+        {
+            float radius = Mathf.Min(hitRadius, player != null && player.StandingBodyHeight > 0f ? player.StandingBodyHeight * 0.06f : 0.06f);
+            return pattern == AttackPattern.LiquidPunch ? radius : radius * 1.5f;
+        }
+    }
 
     private Vector3 EmissionPosition()
     {
