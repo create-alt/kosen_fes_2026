@@ -31,6 +31,7 @@ public class StraightMissile : MonoBehaviour
     public static event Action<StraightMissile, Vector3> PredictionStarted;
     public static event Action<StraightMissile> PredictionEnded;
     public bool IsPredicting => showingPrediction && isActiveAndEnabled;
+    private float AttackRadius => Mathf.Max(hitRadius * 1.5f, targetPlayer != null && targetPlayer.StandingBodyHeight > 0f ? targetPlayer.StandingBodyHeight * 0.1f : 0.12f);
     public Vector3 PredictionPosition { get; private set; }
     public Vector3 IncomingDirection { get; private set; }
     public Vector3 PlayerForwardDirection { get; private set; } = Vector3.forward;
@@ -89,7 +90,7 @@ public class StraightMissile : MonoBehaviour
         transform.position += direction * distance;
         traveled += distance;
 
-        if (flyingIncoming && targetPlayer != null && targetPlayer.TryReceiveAttack(previousPosition, transform.position, hitRadius))
+        if (flyingIncoming && targetPlayer != null && targetPlayer.TryReceiveLateralAttack(previousPosition, transform.position, AttackRadius))
         {
             initialized = false;
             EndPrediction();
@@ -97,7 +98,7 @@ public class StraightMissile : MonoBehaviour
             return;
         }
 
-        if (flyingIncoming && threatenedAtLock && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, hitRadius))
+        if (flyingIncoming && threatenedAtLock && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, AttackRadius))
         {
             dodgeReported = true;
             targetPlayer.ReportDodge();
@@ -124,12 +125,13 @@ public class StraightMissile : MonoBehaviour
         transform.position = PredictionPosition + forward * Mathf.Max(3f, incomingDistance);
         Vector3 moveDirection = -forward;
         float aimDistance = Vector3.Distance(transform.position, PredictionPosition);
+        float rearDistance = targetPlayer != null ? Vector3.Dot(transform.position - targetPlayer.GetRearmostStandingPosition(0.5f), forward) : aimDistance;
         float clearance = targetPlayer != null ? Mathf.Max(0.5f, targetPlayer.StandingBodyHeight) : 1f;
-        threatenedAtLock = targetPlayer != null && targetPlayer.WouldReceiveAttack(transform.position, PredictionPosition + moveDirection * clearance, hitRadius);
+        threatenedAtLock = targetPlayer != null && targetPlayer.WouldReceiveLateralAttack(transform.position, PredictionPosition + moveDirection * clearance, AttackRadius);
         IncomingDirection = transform.position - PredictionPosition;
         PlayerForwardDirection = targetPlayer != null ? targetPlayer.TrackingForwardDirection : Vector3.forward;
         flyingIncoming = true;
-        BeginFlight(moveDirection, aimDistance + clearance, Quaternion.LookRotation(moveDirection, Vector3.up));
+        BeginFlight(moveDirection, Mathf.Max(aimDistance, rearDistance) + clearance, Quaternion.LookRotation(moveDirection, Vector3.up));
         waitRemaining = Mathf.Max(minimumPredictionTime, predictionTime);
         showingPrediction = true;
         PredictionStarted?.Invoke(this, transform.position);

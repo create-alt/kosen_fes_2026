@@ -107,6 +107,3 @@ InitTestScene*.unity*
 
 /Assets/SceneBackups/
 /Assets/SceneBackups.meta
-# Local scene backups
-/Assets/SceneBackups/
-/Assets/SceneBackups.meta

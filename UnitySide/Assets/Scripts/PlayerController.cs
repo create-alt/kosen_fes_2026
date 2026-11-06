@@ -402,6 +402,18 @@ public class PlayerController : MonoBehaviour
         return IntersectsBody(start, end, radius, out _);
     }
 
+    public bool WouldReceiveLateralAttack(Vector3 start, Vector3 end, float radius)
+    {
+        return IntersectsBody(start, end, radius, out _, true);
+    }
+
+    public bool TryReceiveLateralAttack(Vector3 start, Vector3 end, float radius)
+    {
+        if (!IntersectsBody(start, end, radius, out _, true)) return false;
+        TakeDamage();
+        return true;
+    }
+
     public bool HasAttackPassed(Vector3 position, Vector3 direction, float radius)
     {
         if (bodyCollider == null || !bodyCollider.enabled || !gameplayEnabled) return false;
@@ -428,7 +440,7 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
-    private bool IntersectsBody(Vector3 start, Vector3 end, float radius, out Vector3 hitPosition)
+    private bool IntersectsBody(Vector3 start, Vector3 end, float radius, out Vector3 hitPosition, bool ignoreHeight = false)
     {
         hitPosition = start;
         if (!gameplayEnabled || !isActiveAndEnabled || bodyCollider == null || !bodyCollider.enabled || !bodyCollider.gameObject.activeInHierarchy) return false;
@@ -439,7 +451,13 @@ public class PlayerController : MonoBehaviour
         Vector3 localPadding = new Vector3(padding / Mathf.Max(0.0001f, Mathf.Abs(scale.x)), padding / Mathf.Max(0.0001f, Mathf.Abs(scale.y)), padding / Mathf.Max(0.0001f, Mathf.Abs(scale.z)));
         Bounds bounds = new Bounds(bodyCollider.center, bodyCollider.size + localPadding * 2f);
         Vector3 localStart = body.InverseTransformPoint(start);
-        Vector3 segment = body.InverseTransformPoint(end) - localStart;
+        Vector3 localEnd = body.InverseTransformPoint(end);
+        if (ignoreHeight)
+        {
+            localStart.y = bodyCollider.center.y;
+            localEnd.y = bodyCollider.center.y;
+        }
+        Vector3 segment = localEnd - localStart;
         bool hit = bounds.Contains(localStart);
         if (!hit && segment.sqrMagnitude > 0.00000001f)
         {
