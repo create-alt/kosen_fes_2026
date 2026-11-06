@@ -115,7 +115,7 @@ public sealed class PunchBotMotion : MonoBehaviour
 
     public void PlayHit()
     {
-        if (IsDead || PrioritizePunch) return;
+        if (IsDead || PrioritizePunch || IsAttacking) return;
         HitReacted?.Invoke();
         EndMissileAttack(true);
         GetAnimator().Play(HitState, 0, 0f);
