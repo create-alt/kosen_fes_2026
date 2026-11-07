@@ -74,6 +74,9 @@ public class PlayerController : MonoBehaviour
     public Vector3 TrackingForwardDirection => forwardDirection;
     public event Action<PunchResult, Vector3> PunchResolved;
     public event Action Dodged;
+    public event Action PunchPressed;
+    public bool HasLiveTracking => hasUdpTarget;
+    internal bool TrainingMode { get; set; }
     public event Action Damaged;
     public event Action HealthChanged;
     public float CurrentHealth { get; private set; } = 100f;
@@ -262,7 +265,11 @@ public class PlayerController : MonoBehaviour
         if (value != 0f && value != 1f) return false;
         bool pressed = value == 1f && AttackInput == 0f;
         AttackInput = value;
-        if (pressed) Punch();
+        if (pressed)
+        {
+            Punch();
+            PunchPressed?.Invoke();
+        }
         return true;
     }
 
@@ -485,7 +492,14 @@ public class PlayerController : MonoBehaviour
 
     public void TakeDamage()
     {
-        if (IsFinisherRush || !gameplayEnabled || !isActiveAndEnabled || IsDead || Time.timeAsDouble < invulnerableUntil) return;
+        if (IsFinisherRush || !gameplayEnabled || !isActiveAndEnabled || IsDead) return;
+        if (TrainingMode)
+        {
+            BattleAudio.Play(FightSound.PlayerHit);
+            Damaged?.Invoke();
+            return;
+        }
+        if (Time.timeAsDouble < invulnerableUntil) return;
         CurrentHealth = Mathf.Max(0f, CurrentHealth - 10f);
         invulnerableUntil = Time.timeAsDouble + damageInvulnerability;
         if (IsDead) SetGameplayEnabled(false);
@@ -517,7 +531,7 @@ public class PlayerController : MonoBehaviour
 
     public void ResetBattle()
     {
-        if (selectedOpponent == null && target == null && dilatantTarget == null) return;
+        if (target == null && dilatantTarget == null) return;
         ResetHealth();
         SetGameplayEnabled(true);
         BattleAudio.StopAll();

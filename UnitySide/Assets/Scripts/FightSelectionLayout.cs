@@ -93,6 +93,41 @@ public static class FightSelectionLayout
         root.SetAsLastSibling();
     }
 
+    public static GameObject CreateTraining(FightGameUI.Views view, Action enter, Action<DilatantLiquidAttack.AttackPattern> attack, Action leave, out Text status)
+    {
+        Font font = view.chosenEnemy.font;
+        RectTransform setup = view.setup.GetComponent<RectTransform>();
+        Transform menu = view.start.transform.parent;
+        Place(view.start.GetComponent<RectTransform>(), menu, 0.04f, 0.055f, 0.405f, 0.145f, null);
+        TrainingButton(menu, "StartTraining", "動作テスト", font, 0.423f, 0.055f, 0.643f, 0.145f, enter);
+
+        RectTransform root = Panel(setup.parent, "MotionTraining", Color.clear, null);
+        Place(root, setup.parent, 0f, 0f, 1f, 1f, null);
+        RectTransform footer = Panel(root, "TrainingFooter", Background, null);
+        Place(footer, root, 0.04f, 0.035f, 0.96f, 0.15f, null);
+        Label(footer, "Status", "", font, 23, Color.white, 0.025f, 0.58f, 0.98f, 0.98f, null);
+        status = footer.Find("Status").GetComponent<Text>();
+        TrainingButton(footer, "PreviewFront", "前方攻撃", font, 0.025f, 0.1f, 0.25f, 0.55f, () => attack(DilatantLiquidAttack.AttackPattern.FrontShot));
+        TrainingButton(footer, "PreviewWave", "波状攻撃", font, 0.265f, 0.1f, 0.49f, 0.55f, () => attack(DilatantLiquidAttack.AttackPattern.UpperWave));
+        TrainingButton(footer, "PreviewMelee", "近距離パンチ", font, 0.505f, 0.1f, 0.73f, 0.55f, () => attack(DilatantLiquidAttack.AttackPattern.LiquidPunch));
+        TrainingButton(footer, "ExitTraining", "対戦選択に戻る", font, 0.745f, 0.1f, 0.98f, 0.55f, leave);
+        root.gameObject.SetActive(false);
+        return root.gameObject;
+    }
+
+    private static void TrainingButton(Transform parent, string name, string title, Font font, float left, float bottom, float right, float top, Action clicked)
+    {
+        RectTransform rect = Panel(parent, name, Surface, null);
+        Button button = rect.gameObject.AddComponent<Button>();
+        Image image = rect.GetComponent<Image>();
+        image.raycastTarget = true;
+        button.targetGraphic = image;
+        button.onClick.AddListener(() => clicked());
+        Label(rect, "Label", title, font, 26, Color.white, 0.02f, 0f, 0.98f, 1f, null);
+        rect.Find("Label").GetComponent<Text>().alignment = TextAnchor.MiddleCenter;
+        Place(rect, parent, left, bottom, right, top, null);
+    }
+
     private static void StyleCard(FightGameUI.Views view, EnemySelectionController selection, int index, Font font, Action<GameObject> created, Action<Transform, Transform> reparent)
     {
         Button button = view.enemyCards[index];

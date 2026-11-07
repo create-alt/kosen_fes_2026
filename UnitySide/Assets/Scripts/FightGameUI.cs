@@ -56,6 +56,13 @@ public sealed class FightGameUI : MonoBehaviour
     [SerializeField] private EnemySelectionController selection;
     [SerializeField] private Views view;
     private CombatFeedback feedback;
+    private GameObject trainingPanel;
+    private Transform trainingReference;
+    private Text trainingStatus;
+    private DilatantLiquidAttack trainingAttack;
+    private string trainingInstruction;
+    private Transform trainingBag;
+    private float trainingPunchTime = float.NegativeInfinity;
     private bool resultAnnounced;
     private float resultElapsed;
     private int selectedEnemy;
@@ -80,6 +87,8 @@ public sealed class FightGameUI : MonoBehaviour
     {
         if (player == null || selection == null || view == null) return;
         ApplySelectionLayout();
+        trainingPanel = FightSelectionLayout.CreateTraining(view, StartTraining, StartTrainingAttack, ReturnToMenu, out trainingStatus);
+        player.PunchPressed += OnTrainingPunch;
         BoxingArenaBackdrop.Install(player);
         GameObject overlay = new GameObject("CombatFeedback", typeof(RectTransform), typeof(CanvasRenderer), typeof(CombatFeedback));
         overlay.transform.SetParent(transform, false);
@@ -194,7 +203,7 @@ public sealed class FightGameUI : MonoBehaviour
 
     public void StartBattle()
     {
-        if (!selection.IsSelecting) return;
+        if (!selection.IsSelecting || trainingPanel.activeSelf) return;
         ResetPresentation();
         SaveSettings();
         player.SetMaxHealth(FightSettings.PlayerHealth);
@@ -212,8 +221,124 @@ public sealed class FightGameUI : MonoBehaviour
         RefreshHuds(true);
     }
 
+    private void StartTraining()
+    {
+        if (!selection.IsSelecting || trainingPanel.activeSelf) return;
+        ResetPresentation();
+        SaveSettings();
+        PrepareTrainingBag();
+        player.SetOpponent(trainingReference);
+        player.TrainingMode = true;
+        player.SetGameplayEnabled(true);
+        if (trainingAttack == null)
+        {
+            GameObject source = new GameObject("TrainingAttackSource");
+            trainingAttack = source.AddComponent<DilatantLiquidAttack>();
+        }
+        trainingAttack.transform.position = trainingReference.position;
+        trainingAttack.ConfigureTraining(player, Resources.Load<Material>("FightArena/ArenaLit"));
+        trainingAttack.gameObject.SetActive(true);
+        trainingPunchTime = float.NegativeInfinity;
+        trainingInstruction = "下のボタンで攻撃を選び、予測線を見て避けよう";
+        view.setup.SetActive(false);
+        trainingPanel.SetActive(true);
+        UpdateTraining();
+    }
+
+    private void PrepareTrainingBag()
+    {
+        Vector3 floor = player.GetStandingPosition(0f);
+        GameObject enemy = selection.GetEnemy(selectedEnemy);
+        Vector3 direction = enemy != null ? Vector3.ProjectOnPlane(enemy.transform.position - floor, Vector3.up) : player.TrackingForwardDirection;
+        if (direction.sqrMagnitude < 0.001f) direction = Vector3.forward;
+        float height = Mathf.Max(0.6f, player.StandingBodyHeight);
+        if (trainingReference == null)
+        {
+            trainingReference = new GameObject("TrainingPunchBag").transform;
+            trainingBag = new GameObject("BagPivot").transform;
+            trainingBag.SetParent(trainingReference, false);
+            trainingBag.localPosition = Vector3.up * (height * 0.21f);
+            CreateBagPart(trainingReference, "Base", PrimitiveType.Cylinder, new Vector3(0f, height * 0.055f, 0f),
+                new Vector3(0.46f, 0.055f, 0.46f) * height, new Color(0.13f, 0.16f, 0.22f));
+            CreateBagPart(trainingReference, "Support", PrimitiveType.Cylinder, new Vector3(0f, height * 0.21f, 0f),
+                new Vector3(0.09f, 0.15f, 0.09f) * height, new Color(0.2f, 0.23f, 0.3f));
+            CreateBagPart(trainingBag, "Cushion", PrimitiveType.Capsule, new Vector3(0f, height * 0.43f, 0f),
+                new Vector3(0.34f, 0.42f, 0.34f) * height, new Color(0.8f, 0.13f, 0.19f));
+            CreateBagPart(trainingBag, "Stripe", PrimitiveType.Cylinder, new Vector3(0f, height * 0.45f, 0f),
+                new Vector3(0.345f, 0.025f, 0.345f) * height, new Color(1f, 0.72f, 0.26f));
+        }
+        trainingReference.SetPositionAndRotation(floor + direction.normalized * Mathf.Max(1.2f, height * 1.45f), Quaternion.LookRotation(direction));
+        trainingBag.localRotation = Quaternion.identity;
+        trainingReference.gameObject.SetActive(true);
+    }
+
+    private void CreateBagPart(Transform parent, string partName, PrimitiveType shape, Vector3 position, Vector3 scale, Color color)
+    {
+        GameObject part = GameObject.CreatePrimitive(shape);
+        part.name = partName;
+        part.transform.SetParent(parent, false);
+        part.transform.localPosition = position;
+        part.transform.localScale = scale;
+        Collider collider = part.GetComponent<Collider>();
+        collider.enabled = false;
+        Destroy(collider);
+        Renderer renderer = part.GetComponent<Renderer>();
+        Material material = Resources.Load<Material>("FightArena/ArenaLit");
+        if (material != null) renderer.sharedMaterial = material;
+        MaterialPropertyBlock tint = new MaterialPropertyBlock();
+        tint.SetColor("_BaseColor", color);
+        tint.SetColor("_Color", color);
+        renderer.SetPropertyBlock(tint);
+    }
+
+    private void OnTrainingPunch()
+    {
+        if (trainingPanel == null || !trainingPanel.activeSelf) return;
+        trainingPunchTime = Time.unscaledTime;
+        trainingBag.localRotation = Quaternion.Euler(13f, 0f, 0f);
+        BattleAudio.Play(FightSound.PlayerPunch);
+    }
+
+    private void StartTrainingAttack(DilatantLiquidAttack.AttackPattern pattern)
+    {
+        if (!trainingPanel.activeSelf || !trainingAttack.TryStartTrainingAttack(pattern)) return;
+        switch (pattern)
+        {
+            case DilatantLiquidAttack.AttackPattern.FrontShot:
+                trainingInstruction = "前方攻撃　縦線から左右に外れる";
+                break;
+            case DilatantLiquidAttack.AttackPattern.UpperWave:
+                trainingInstruction = "波状攻撃　横線が見えたらしゃがむ";
+                break;
+            case DilatantLiquidAttack.AttackPattern.LiquidPunch:
+                trainingInstruction = "近距離パンチ　下側の帯が見えたら後退する";
+                break;
+        }
+    }
+
+    private void UpdateTraining()
+    {
+        float elapsed = Time.unscaledTime - trainingPunchTime;
+        float tilt = elapsed < 1.2f ? Mathf.Cos(elapsed * 15f) * Mathf.Exp(-elapsed * 4f) * 13f : 0f;
+        trainingBag.localRotation = Quaternion.Euler(tilt, 0f, 0f);
+        string input = player.HasLiveTracking ? "画像認識を受信中" : player.KeyboardTestEnabled ? "キーボード操作可" : "画像認識の入力待ち";
+        trainingStatus.text = trainingInstruction + "　／　" + input;
+    }
+
+    private void OnDestroy()
+    {
+        if (player != null) player.PunchPressed -= OnTrainingPunch;
+        if (trainingAttack != null) Destroy(trainingAttack.gameObject);
+        if (player != null && trainingPanel != null && trainingPanel.activeSelf) player.TrainingMode = false;
+        if (trainingReference != null) Destroy(trainingReference.gameObject);
+    }
+
     public void ReturnToMenu()
     {
+        if (trainingAttack != null) trainingAttack.gameObject.SetActive(false);
+        player.TrainingMode = false;
+        if (trainingPanel != null) trainingPanel.SetActive(false);
+        if (trainingReference != null) trainingReference.gameObject.SetActive(false);
         ResetPresentation();
         SaveSettings();
         selection.ReturnToSelection();
@@ -231,6 +356,11 @@ public sealed class FightGameUI : MonoBehaviour
     private void Update()
     {
         if (player == null || selection == null || view == null) return;
+        if (trainingPanel != null && trainingPanel.activeSelf)
+        {
+            UpdateTraining();
+            return;
+        }
         RefreshHuds(false);
         bool finished = !selection.IsSelecting && (player.IsDead || (player.OpponentMaxHealth > 0f && player.OpponentHealth <= 0f));
         if (view.rush != null)
