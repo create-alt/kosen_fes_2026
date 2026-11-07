@@ -23,12 +23,8 @@ import numpy as np
 
 from args import add_pipeline_args, check_args
 from logic import HoldKey
-<<<<<<< HEAD
 from effects import ScreenView
-from output import Reporter
-=======
 from output import Reporter, Screen, draw_overlay
->>>>>>> 7339cb8e4abcffd8e0774964323b40c52caa4bf5
 from pipeline import Pipeline
 
 WINDOW = "Punching Bag (realtime) (Q: quit, F: fullscreen on/off)"
@@ -182,14 +178,11 @@ def main():
             reporter.emit(result)
 
             if display:
-<<<<<<< HEAD
                 frame = view.draw(frame, pipeline, result, hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
                 cv2.imshow(WINDOW, frame)
-=======
                 draw_overlay(frame, pipeline.bag, pipeline.person, pipeline.judge, pipeline.motion, result,
                              hint=f"Hold '{args.calib_key.upper()}' to (re)calibrate")
                 screen.show(frame)
->>>>>>> 7339cb8e4abcffd8e0774964323b40c52caa4bf5
                 key = cv2.waitKey(1)
                 view.key(key)
                 if hold:
