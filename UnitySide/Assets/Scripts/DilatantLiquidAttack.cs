@@ -24,6 +24,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     [SerializeField, Min(0f)] private float punchStepDistance = 0.35f;
     [SerializeField] private bool showPrediction = true;
     [SerializeField] private bool externalControl;
+    private bool trainingAttack;
 
     private enum Phase { Waiting, Charging, Flying, Splash }
     public enum AttackPattern { FrontShot, UpperWave, LiquidPunch }
@@ -38,7 +39,8 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     public Vector3 IncomingDirection => launchPosition - PredictionPosition;
     public Vector3 PlayerForwardDirection => player != null ? player.TrackingForwardDirection : Vector3.forward;
     public float ChargeProgress => Mathf.Clamp01(elapsed / activeChargeDuration);
-    public Color PredictionColor => pattern == AttackPattern.FrontShot ? new Color(1f, 0.65f, 0.05f) : pattern == AttackPattern.LiquidPunch ? new Color(0.15f, 0.85f, 1f) : new Color(1f, 0.15f, 0.15f);
+    public Color PredictionColor => GetPredictionColor(pattern);
+    public static Color GetPredictionColor(AttackPattern pattern) => pattern == AttackPattern.FrontShot ? new Color(1f, 0.65f, 0.05f) : pattern == AttackPattern.LiquidPunch ? new Color(0.15f, 0.85f, 1f) : new Color(1f, 0.15f, 0.15f);
 
     private DilatantEnemy enemy;
     private Phase phase;
@@ -120,7 +122,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (enemy == null || enemy.IsDead) return;
+        if (trainingAttack || enemy == null || enemy.IsDead) return;
         if (!enemy.PrioritizePunch && poseAnimator != null && poseAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash != IdleState) return;
         if (pattern == AttackPattern.LiquidPunch)
         {
@@ -211,10 +213,28 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         externalControl = true;
     }
 
+    internal void ConfigureTraining(PlayerController targetPlayer, Material material)
+    {
+        ConfigureExternalControl(targetPlayer);
+        trainingAttack = true;
+        liquidMaterial = material;
+        battleVersion = targetPlayer.BattleVersion;
+    }
+
+    internal bool TryStartTrainingAttack(AttackPattern attackPattern)
+    {
+        return trainingAttack && TryStartExternalAttack(attackPattern, 1.6f, 1.3f);
+    }
+
     public bool TryStartWave(float telegraph, float flightTime)
     {
+        return TryStartExternalAttack(AttackPattern.UpperWave, telegraph, flightTime);
+    }
+
+    private bool TryStartExternalAttack(AttackPattern attackPattern, float telegraph, float flightTime)
+    {
         if (!externalControl || !isActiveAndEnabled || IsBusy || enemy == null || enemy.IsDead || player == null || !player.GameplayEnabled || player.IsDead || player.IsFinisherRush) return false;
-        BeginCharge(AttackPattern.UpperWave, telegraph, flightTime);
+        BeginCharge(attackPattern, telegraph, flightTime);
         return true;
     }
 
@@ -237,7 +257,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         enemy.PrioritizePunch = pattern == AttackPattern.LiquidPunch;
         punchRetreatLimit = player.ForwardOffset - 0.12f;
         dodgeReported = false;
-        if (player.IsTooClose && pattern == AttackPattern.LiquidPunch)
+        if (!trainingAttack && player.IsTooClose && pattern == AttackPattern.LiquidPunch)
         {
             activeChargeDuration = difficulty.PressureTelegraph;
             activeRecoveryDuration = difficulty.PressureRecovery;
@@ -275,9 +295,17 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
     {
         if (pattern == AttackPattern.LiquidPunch)
         {
-            CachePunchRig();
-            launchPosition = PunchFistPosition(0f, 1f);
-            aimPosition = PunchFistPosition(1f, 1f);
+            if (trainingAttack)
+            {
+                aimPosition = player.GetStandingPosition(0.75f);
+                launchPosition = new Vector3(transform.position.x, aimPosition.y, transform.position.z);
+            }
+            else
+            {
+                CachePunchRig();
+                launchPosition = PunchFistPosition(0f, 1f);
+                aimPosition = PunchFistPosition(1f, 1f);
+            }
             PredictionPosition = aimPosition;
             return;
         }
@@ -429,7 +457,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
         if (!punchImpactApplied && elapsed >= impactTime)
         {
             punchImpactApplied = true;
-            if (player.ForwardOffset >= punchRetreatLimit && InPunchReach() && TryHitWithPunch())
+            if (player.ForwardOffset >= punchRetreatLimit && (trainingAttack || InPunchReach()) && TryHitWithPunch())
             {
                 attackHit = true;
                 SetColor(new Color(0.85f, 1f, 1f));
@@ -445,6 +473,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private bool TryHitWithPunch()
     {
+        if (trainingAttack) return player.TryReceiveLowAttack(aimPosition, aimPosition, AttackRadius);
         Vector3 previous = PunchFistPosition(0f, 1f);
         for (int index = 1; index <= 12; index++)
         {
@@ -485,6 +514,7 @@ public sealed class DilatantLiquidAttack : MonoBehaviour
 
     private Vector3 PunchFistPosition(float extension, float charge)
     {
+        if (trainingAttack) return Vector3.Lerp(launchPosition, aimPosition, extension);
         if (punchBody == null || punchArm == null)
         {
             return transform.TransformPoint(new Vector3(Mathf.Lerp(0.3f, 0.12f, extension), 0.8f, Mathf.Lerp(0.15f - charge * 0.08f, liquidPunchReach * 0.8f + punchStepDistance, extension)));

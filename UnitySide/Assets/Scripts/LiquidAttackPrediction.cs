@@ -57,6 +57,13 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
         {
             if (existing.Attack == attack) return;
         }
+        Warning warning = new Warning { Attack = attack, Line = CreateLine() };
+        warnings.Add(warning);
+        UpdateWarning(warning);
+    }
+
+    private Image CreateLine()
+    {
         Image line = Instantiate(predictionLineTemplate, predictionLineTemplate.transform.parent);
         line.name = "LiquidPredictionLine";
         line.sprite = null;
@@ -65,42 +72,46 @@ public sealed class LiquidAttackPrediction : MonoBehaviour
         line.raycastTarget = false;
         line.enabled = true;
         line.transform.SetAsLastSibling();
-        Warning warning = new Warning { Attack = attack, Line = line };
-        warnings.Add(warning);
-        UpdateWarning(warning);
+        return line;
     }
 
     private void UpdateWarning(Warning warning)
     {
         Transform cameraTransform = targetCamera.transform;
-        Vector3 relative = warning.Attack.PredictionPosition - cameraTransform.position;
+        bool sideView = Mathf.Abs(Vector3.Dot(cameraTransform.right, warning.Attack.PlayerForwardDirection)) > 0.5f;
+        bool depthLane = warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.FrontShot && targetCamera.targetDisplay == 0;
+        bool vertical = depthLane || (sideView && warning.Attack.CurrentPattern != DilatantLiquidAttack.AttackPattern.UpperWave);
+        DrawLine(warning.Line, warning.Attack.CurrentPattern, warning.Attack.PredictionPosition, warning.Attack.PredictionBottom, vertical);
+    }
+
+    private void DrawLine(Image image, DilatantLiquidAttack.AttackPattern pattern, Vector3 position, Vector3 bottom, bool vertical)
+    {
+        Transform cameraTransform = targetCamera.transform;
+        Vector3 relative = position - cameraTransform.position;
         float depth = Mathf.Max(projectionDistance, targetCamera.nearClipPlane + 0.1f);
         Vector3 reference = cameraTransform.position + Vector3.ProjectOnPlane(relative, cameraTransform.forward) + cameraTransform.forward * depth;
         Vector3 viewport = targetCamera.WorldToViewportPoint(reference);
         Rect cameraRect = targetCamera.rect;
-        bool sideView = Mathf.Abs(Vector3.Dot(cameraTransform.right, warning.Attack.PlayerForwardDirection)) > 0.5f;
-        bool depthLane = warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.FrontShot && targetCamera.targetDisplay == 0;
-        bool vertical = depthLane || (sideView && warning.Attack.CurrentPattern != DilatantLiquidAttack.AttackPattern.UpperWave);
         float x = cameraRect.x + Mathf.Clamp(viewport.x, 0.05f, 0.95f) * cameraRect.width;
         float y = cameraRect.y + Mathf.Clamp(viewport.y, 0.05f, 0.95f) * cameraRect.height;
-        RectTransform line = warning.Line.rectTransform;
+        RectTransform line = image.rectTransform;
         line.anchorMin = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.05f) : new Vector2(cameraRect.x + cameraRect.width * 0.05f, y);
         line.anchorMax = vertical ? new Vector2(x, cameraRect.y + cameraRect.height * 0.95f) : new Vector2(cameraRect.x + cameraRect.width * 0.95f, y);
         line.pivot = new Vector2(0.5f, 0.5f);
         line.anchoredPosition = Vector2.zero;
-        float width = Mathf.Max(warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.LiquidPunch ? 70f : 27f, lineWidth);
+        float width = Mathf.Max(pattern == DilatantLiquidAttack.AttackPattern.LiquidPunch ? 70f : 27f, lineWidth);
         line.sizeDelta = vertical ? new Vector2(width, 0f) : new Vector2(0f, width);
         line.localRotation = Quaternion.identity;
         line.localScale = Vector3.one;
-        Color color = warning.Attack.PredictionColor;
+        Color color = DilatantLiquidAttack.GetPredictionColor(pattern);
         color.a = 0.9f;
-        if (warning.Attack.CurrentPattern == DilatantLiquidAttack.AttackPattern.LiquidPunch)
+        if (pattern == DilatantLiquidAttack.AttackPattern.LiquidPunch)
         {
-            AttackPredictionScreen.SetLowerBand(line, targetCamera, warning.Attack.PredictionPosition, warning.Attack.PredictionBottom, projectionDistance);
+            AttackPredictionScreen.SetLowerBand(line, targetCamera, position, bottom, projectionDistance);
             color.a = 0.3f;
         }
-        warning.Line.color = color;
-        warning.Line.gameObject.SetActive(targetCamera.isActiveAndEnabled);
+        image.color = color;
+        image.gameObject.SetActive(targetCamera.isActiveAndEnabled);
     }
 
     private void Hide(DilatantLiquidAttack attack)
