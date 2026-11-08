@@ -30,7 +30,6 @@ public class StraightMissile : MonoBehaviour
     public static event Action<StraightMissile, Vector3> PredictionStarted;
     public static event Action<StraightMissile> PredictionEnded;
     public bool IsPredicting => showingPrediction && isActiveAndEnabled;
-    private float AttackRadius => Mathf.Max(hitRadius * 1.5f, targetPlayer != null && targetPlayer.StandingBodyHeight > 0f ? targetPlayer.StandingBodyHeight * 0.1f : 0.12f);
     public Vector3 PredictionPosition { get; private set; }
     public Vector3 IncomingDirection { get; private set; }
     public Vector3 PlayerForwardDirection { get; private set; } = Vector3.forward;
@@ -89,7 +88,7 @@ public class StraightMissile : MonoBehaviour
         transform.position += direction * distance;
         traveled += distance;
 
-        if (flyingIncoming && targetPlayer != null && targetPlayer.TryReceiveLateralAttack(previousPosition, transform.position, AttackRadius))
+        if (flyingIncoming && targetPlayer != null && targetPlayer.TryReceiveLateralAttack(previousPosition, transform.position, hitRadius))
         {
             initialized = false;
             EndPrediction();
@@ -97,7 +96,7 @@ public class StraightMissile : MonoBehaviour
             return;
         }
 
-        if (flyingIncoming && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, AttackRadius))
+        if (flyingIncoming && !dodgeReported && targetPlayer != null && targetPlayer.HasAttackPassed(transform.position, direction, hitRadius))
         {
             dodgeReported = true;
             targetPlayer.ReportDodge();
